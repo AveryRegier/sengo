@@ -1,0 +1,22 @@
+{
+  "name": "sengo",
+  "version": "1.0.0",
+  "description": "An open source clean room implementation of a useful subset of the MongoDb client for node.js that uses AWS S3 as a backend location for documents.",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "clean": "rimraf build *.tsbuildinfo"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.0.4",
+    "jest": "^30.0.3",
+    "rimraf": "^3.0.2",
+    "ts-jest": "^29.4.0",
+    "typescript": "^5.8.3"
+  }
+}
