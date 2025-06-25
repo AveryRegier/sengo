@@ -1,4 +1,6 @@
-export class Storage {
+import { CollectionStore } from '..';
+
+export class Storage implements CollectionStore {
   private documents: Record<string, any>[] = [];
 
   insertOne(doc: Record<string, any>) {

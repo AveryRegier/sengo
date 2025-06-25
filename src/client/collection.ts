@@ -1,11 +1,12 @@
-import { Storage } from '../repository/memory';
+import { getRepository, CollectionStore } from '../repository';
 
 export class SengoCollection {
   static collections: Record<string, SengoCollection> = {};
-  private store = new Storage();
+  private store: CollectionStore;
   name: string;
-  constructor(name: string) {
+  constructor(name: string, repositoryType: string = 'memory') {
     this.name = name;
+    this.store = getRepository(repositoryType);
   }
 
   async insertOne(doc: Record<string, any>) {
