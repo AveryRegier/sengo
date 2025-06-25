@@ -1,4 +1,4 @@
-import { SengoClient } from './index';
+import { SengoClient } from './client/client';
 import Chance from 'chance';
 
 const chance = new Chance();
