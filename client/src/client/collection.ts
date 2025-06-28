@@ -1,4 +1,4 @@
-import type { CollectionStore } from '../repository/index.js';
+import type { CollectionStore } from '../repository/index';
 
 export class SengoCollection {
   name: string;

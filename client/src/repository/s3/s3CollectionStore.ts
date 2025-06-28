@@ -1,4 +1,5 @@
-import type { CollectionStore } from '../index.js';
+import type { CollectionStore } from '../';
+import { ObjectId } from 'bson';
 import {
   S3Client,
   PutObjectCommand,
@@ -33,7 +34,7 @@ export class S3CollectionStore implements CollectionStore {
 
   async insertOne(doc: Record<string, any>) {
     if (this.closed) throw new Error('Store is closed');
-    const _id = doc._id || Math.random().toString(36).slice(2);
+    const _id = doc._id || new ObjectId();
     const key = `${this.collection}/data/${_id}.json`;
     const body = JSON.stringify({ ...doc, _id });
     await this.s3.send(new PutObjectCommand({
@@ -42,6 +43,7 @@ export class S3CollectionStore implements CollectionStore {
       Body: body,
       ContentType: 'application/json',
     }));
+   
     return { acknowledged: true, insertedId: _id };
   }
 
@@ -80,41 +82,28 @@ export class S3CollectionStore implements CollectionStore {
         Prefix: prefix,
       }));
     } catch (err: any) {
-      if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-        throw new Error('MongoNetworkError: failed to connect to server');
-      }
+      if (err.name === 'NoSuchBucket') return [];
       throw err;
     }
+    if (!listed.Contents) return [];
     const results: any[] = [];
-    if (listed.Contents) {
-      for (const obj of listed.Contents) {
-        if (!obj.Key) continue;
-        let getObj;
-        try {
-          getObj = await this.s3.send(new GetObjectCommand({
-            Bucket: this.bucket,
-            Key: obj.Key,
-          }));
-        } catch (err: any) {
-          if (err.name === 'NoSuchKey') continue;
-          if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-            throw new Error('MongoNetworkError: failed to connect to server');
-          }
-          throw err;
-        }
-        const stream = getObj.Body as Readable;
-        const data = await new Promise<string>((resolve, reject) => {
-          let str = '';
-          stream.on('data', chunk => (str += chunk));
-          stream.on('end', () => resolve(str));
-          stream.on('error', reject);
-        });
-        const parsed = JSON.parse(data);
-        let match = true;
-        for (const [k, v] of Object.entries(query)) {
-          if (parsed[k] !== v) match = false;
-        }
-        if (match) results.push(parsed);
+    for (const obj of listed.Contents) {
+      const key = obj.Key!;
+      const result = await this.s3.send(new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }));
+      const stream = result.Body as Readable;
+      const data = await new Promise<string>((resolve, reject) => {
+        let str = '';
+        stream.on('data', chunk => (str += chunk));
+        stream.on('end', () => resolve(str));
+        stream.on('error', reject);
+      });
+      const parsed = JSON.parse(data);
+      // Compare _id as string for compatibility
+      if (Object.entries(query).every(([k, v]) => parsed[k]?.toString() === v?.toString())) {
+        results.push(parsed);
       }
     }
     return results;

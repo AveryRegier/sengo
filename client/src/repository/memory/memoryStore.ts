@@ -1,5 +1,5 @@
-import type { CollectionStore, DbStore } from '../index.js';
-import { MemoryCollectionStore } from './memoryCollectionStore.js';
+import type { CollectionStore, DbStore } from '../index';
+import { MemoryCollectionStore } from './memoryCollectionStore';
 
 export class MemoryStore implements DbStore {
   private stores: Record<string, MemoryCollectionStore> = {};

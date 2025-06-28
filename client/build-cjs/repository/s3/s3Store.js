@@ -10,7 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.S3Store = void 0;
-const s3CollectionStore_js_1 = require("./s3CollectionStore.js");
+const s3CollectionStore_1 = require("./s3CollectionStore");
 class S3Store {
     constructor(bucket = 'sengo-default-bucket') {
         this.stores = {};
@@ -21,7 +21,7 @@ class S3Store {
         if (this.closed)
             throw new Error('Store is closed');
         if (!this.stores[name]) {
-            this.stores[name] = new s3CollectionStore_js_1.S3CollectionStore(name, this.bucket);
+            this.stores[name] = new s3CollectionStore_1.S3CollectionStore(name, this.bucket);
         }
         return this.stores[name];
     }

@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MemoryCollectionStore = void 0;
+const bson_1 = require("bson");
 class MemoryCollectionStore {
     constructor(name) {
         this.documents = [];
@@ -18,7 +19,7 @@ class MemoryCollectionStore {
     }
     insertOne(doc) {
         this.checkClosure();
-        const _id = Math.random().toString(36).slice(2);
+        const _id = doc._id || new bson_1.ObjectId();
         const document = Object.assign(Object.assign({}, doc), { _id });
         this.documents.push(document);
         return { acknowledged: true, insertedId: _id };
@@ -30,7 +31,7 @@ class MemoryCollectionStore {
     find(query) {
         this.checkClosure();
         return this.documents.filter(doc => {
-            return Object.entries(query).every(([k, v]) => doc[k] === v);
+            return Object.entries(query).every(([k, v]) => { var _a; return ((_a = doc[k]) === null || _a === void 0 ? void 0 : _a.toString()) === (v === null || v === void 0 ? void 0 : v.toString()); });
         });
     }
     close() {

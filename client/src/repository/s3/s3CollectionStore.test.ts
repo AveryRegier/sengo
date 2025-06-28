@@ -1,5 +1,5 @@
-import { S3CollectionStore } from './s3CollectionStore.js';
-import type { S3CollectionStoreOptions } from './s3CollectionStore.js';
+import { S3CollectionStore } from './s3CollectionStore';
+import type { S3CollectionStoreOptions } from './s3CollectionStore';
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
 jest.mock('@aws-sdk/client-s3');

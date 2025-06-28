@@ -1,4 +1,5 @@
-import type { CollectionStore } from '../index.js';
+import type { CollectionStore } from '../index';
+import { ObjectId } from 'bson';
 
 export class MemoryCollectionStore implements CollectionStore {
   private documents: Record<string, any>[] = [];
@@ -10,7 +11,7 @@ export class MemoryCollectionStore implements CollectionStore {
 
   insertOne(doc: Record<string, any>) {
     this.checkClosure();
-    const _id = Math.random().toString(36).slice(2);
+    const _id = doc._id || new ObjectId();
     const document = { ...doc, _id };
     this.documents.push(document);
     return { acknowledged: true, insertedId: _id };
@@ -23,7 +24,7 @@ export class MemoryCollectionStore implements CollectionStore {
   find(query: Record<string, any>) {
     this.checkClosure();
     return this.documents.filter(doc => {
-      return Object.entries(query).every(([k, v]) => doc[k] === v);
+      return Object.entries(query).every(([k, v]) => doc[k]?.toString() === v?.toString());
     });
   }
 

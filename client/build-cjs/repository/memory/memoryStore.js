@@ -10,7 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MemoryStore = void 0;
-const memoryCollectionStore_js_1 = require("./memoryCollectionStore.js");
+const memoryCollectionStore_1 = require("./memoryCollectionStore");
 class MemoryStore {
     constructor() {
         this.stores = {};
@@ -20,7 +20,7 @@ class MemoryStore {
         if (this.closed)
             throw new Error('Store is closed');
         if (!this.stores[name]) {
-            this.stores[name] = new memoryCollectionStore_js_1.MemoryCollectionStore(name);
+            this.stores[name] = new memoryCollectionStore_1.MemoryCollectionStore(name);
         }
         return this.stores[name];
     }

@@ -1,5 +1,5 @@
-import { MemoryStore } from './memory/index.js';
-import { S3Store } from './s3/s3Store.js';
+import { MemoryStore } from './memory/index';
+import { S3Store } from './s3/s3Store';
 
 export interface CollectionStore {
   insertOne(doc: Record<string, any>): Promise<{ acknowledged: boolean; insertedId: string }> | { acknowledged: boolean; insertedId: string };

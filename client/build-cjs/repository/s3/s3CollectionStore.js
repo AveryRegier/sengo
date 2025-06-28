@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.S3CollectionStore = void 0;
+const bson_1 = require("bson");
 const client_s3_1 = require("@aws-sdk/client-s3");
 class S3CollectionStore {
     constructor(collection, bucket, opts) {
@@ -22,7 +23,7 @@ class S3CollectionStore {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.closed)
                 throw new Error('Store is closed');
-            const _id = doc._id || Math.random().toString(36).slice(2);
+            const _id = doc._id || new bson_1.ObjectId();
             const key = `${this.collection}/data/${_id}.json`;
             const body = JSON.stringify(Object.assign(Object.assign({}, doc), { _id }));
             yield this.s3.send(new client_s3_1.PutObjectCommand({
@@ -74,46 +75,30 @@ class S3CollectionStore {
                 }));
             }
             catch (err) {
-                if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-                    throw new Error('MongoNetworkError: failed to connect to server');
-                }
+                if (err.name === 'NoSuchBucket')
+                    return [];
                 throw err;
             }
+            if (!listed.Contents)
+                return [];
             const results = [];
-            if (listed.Contents) {
-                for (const obj of listed.Contents) {
-                    if (!obj.Key)
-                        continue;
-                    let getObj;
-                    try {
-                        getObj = yield this.s3.send(new client_s3_1.GetObjectCommand({
-                            Bucket: this.bucket,
-                            Key: obj.Key,
-                        }));
-                    }
-                    catch (err) {
-                        if (err.name === 'NoSuchKey')
-                            continue;
-                        if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-                            throw new Error('MongoNetworkError: failed to connect to server');
-                        }
-                        throw err;
-                    }
-                    const stream = getObj.Body;
-                    const data = yield new Promise((resolve, reject) => {
-                        let str = '';
-                        stream.on('data', chunk => (str += chunk));
-                        stream.on('end', () => resolve(str));
-                        stream.on('error', reject);
-                    });
-                    const parsed = JSON.parse(data);
-                    let match = true;
-                    for (const [k, v] of Object.entries(query)) {
-                        if (parsed[k] !== v)
-                            match = false;
-                    }
-                    if (match)
-                        results.push(parsed);
+            for (const obj of listed.Contents) {
+                const key = obj.Key;
+                const result = yield this.s3.send(new client_s3_1.GetObjectCommand({
+                    Bucket: this.bucket,
+                    Key: key,
+                }));
+                const stream = result.Body;
+                const data = yield new Promise((resolve, reject) => {
+                    let str = '';
+                    stream.on('data', chunk => (str += chunk));
+                    stream.on('end', () => resolve(str));
+                    stream.on('error', reject);
+                });
+                const parsed = JSON.parse(data);
+                // Compare _id as string for compatibility
+                if (Object.entries(query).every(([k, v]) => { var _a; return ((_a = parsed[k]) === null || _a === void 0 ? void 0 : _a.toString()) === (v === null || v === void 0 ? void 0 : v.toString()); })) {
+                    results.push(parsed);
                 }
             }
             return results;

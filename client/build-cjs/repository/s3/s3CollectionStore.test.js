@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-const s3CollectionStore_js_1 = require("./s3CollectionStore.js");
+const s3CollectionStore_1 = require("./s3CollectionStore");
 const client_s3_1 = require("@aws-sdk/client-s3");
 jest.mock('@aws-sdk/client-s3');
 const mockSend = jest.fn();
@@ -30,7 +30,7 @@ describe('S3CollectionStore', () => {
     });
     it('should insert a document successfully', () => __awaiter(void 0, void 0, void 0, function* () {
         mockSend.mockResolvedValueOnce({});
-        const store = new s3CollectionStore_js_1.S3CollectionStore(collection, bucket, opts);
+        const store = new s3CollectionStore_1.S3CollectionStore(collection, bucket, opts);
         const doc = { name: 'fuzzy', kind: 'cat' };
         const result = yield store.insertOne(doc);
         expect(result.acknowledged).toBe(true);
@@ -43,7 +43,7 @@ describe('S3CollectionStore', () => {
         mockSend.mockResolvedValueOnce({
             Body: require('stream').Readable.from([body])
         });
-        const store = new s3CollectionStore_js_1.S3CollectionStore(collection, bucket, opts);
+        const store = new s3CollectionStore_1.S3CollectionStore(collection, bucket, opts);
         const found = yield store.find({ _id: 'abc123' });
         expect(found).toEqual([doc]);
         expect(mockSend).toHaveBeenCalledWith(expect.any(client_s3_1.GetObjectCommand));
@@ -52,7 +52,7 @@ describe('S3CollectionStore', () => {
         const error = new Error('Not found');
         error.name = 'NoSuchKey';
         mockSend.mockRejectedValueOnce(error);
-        const store = new s3CollectionStore_js_1.S3CollectionStore(collection, bucket, opts);
+        const store = new s3CollectionStore_1.S3CollectionStore(collection, bucket, opts);
         const found = yield store.find({ _id: 'notfound' });
         expect(found).toEqual([]);
     }));
@@ -61,12 +61,12 @@ describe('S3CollectionStore', () => {
         const error = new Error('connect ETIMEDOUT');
         error.name = 'TimeoutError';
         mockSend.mockRejectedValueOnce(error);
-        const store = new s3CollectionStore_js_1.S3CollectionStore(collection, bucket, opts);
+        const store = new s3CollectionStore_1.S3CollectionStore(collection, bucket, opts);
         // Should throw a MongoDB-like network error (e.g., MongoNetworkError)
         yield expect(store.find({ _id: 'fail' })).rejects.toThrow(/MongoNetworkError|failed to connect|network error/i);
     }));
     it('should throw Store is closed after close()', () => __awaiter(void 0, void 0, void 0, function* () {
-        const store = new s3CollectionStore_js_1.S3CollectionStore(collection, bucket, opts);
+        const store = new s3CollectionStore_1.S3CollectionStore(collection, bucket, opts);
         yield store.close();
         yield expect(store.insertOne({ name: 'fuzzy' })).rejects.toThrow('Store is closed');
         yield expect(store.find({ _id: 'abc' })).rejects.toThrow('Store is closed');

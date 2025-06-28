@@ -8,7 +8,9 @@
   "scripts": {
     "build": "npm run build --workspace=client && npm run build --workspace=shell",
     "clean": "npm run clean --workspace=client && npm run clean --workspace=shell",
-    "start": "npm run start --workspace=shell"
+    "start": "npm run start --workspace=shell",
+    "test": "npm run test --workspace=client",
+    "verify": "npm run clean && npm run build && npm test"
   },
   "dependencies": {
     "@types/bson": "^4.0.5",

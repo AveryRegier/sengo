@@ -10,15 +10,15 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SengoClient = void 0;
-const index_js_1 = require("../repository/index.js");
-const collection_js_1 = require("./collection.js");
+const index_1 = require("../repository/index");
+const collection_1 = require("./collection");
 class SengoClient {
     constructor(repositoryType = 'memory') {
-        this.dbStore = (0, index_js_1.createRepository)(repositoryType);
+        this.dbStore = (0, index_1.createRepository)(repositoryType);
     }
     db(dbName) {
         return {
-            collection: (name) => new collection_js_1.SengoCollection(name, this.dbStore.collection(name))
+            collection: (name) => new collection_1.SengoCollection(name, this.dbStore.collection(name))
         };
     }
     close() {
