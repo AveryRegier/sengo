@@ -1,4 +1,5 @@
 import { MemoryStore } from './memory';
+import { S3Store } from './s3/s3Store';
 
 export interface CollectionStore {
   insertOne(doc: Record<string, any>): Promise<{ acknowledged: boolean; insertedId: string }> | { acknowledged: boolean; insertedId: string };
@@ -7,14 +8,13 @@ export interface CollectionStore {
 
 export interface DbStore {
   collection(name: string): CollectionStore;
+  close(): Promise<void>;
 }
 
-const memoryStore = new MemoryStore();
-
-export function getRepository(type: string = 'memory'): DbStore {
-  switch (type) {
-    case 'memory':
-    default:
-      return memoryStore;
+export function createRepository(name: string): DbStore {
+  if (name !== 'memory') {
+    return new S3Store(name);
+  } else {  
+    return new MemoryStore();
   }
 }

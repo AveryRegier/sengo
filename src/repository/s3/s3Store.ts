@@ -1,14 +1,19 @@
-import { CollectionStore, DbStore } from '../index';
-import { MemoryCollectionStore } from './memoryCollectionStore';
+import { CollectionStore } from '../index';
+import { S3CollectionStore } from './s3CollectionStore';
 
-export class MemoryStore implements DbStore {
-  private stores: Record<string, MemoryCollectionStore> = {};
+export class S3Store {
+  private bucket: string;
+  private stores: Record<string, S3CollectionStore> = {};
   private closed = false;
+
+  constructor(bucket: string = 'sengo-default-bucket') {
+    this.bucket = bucket;
+  }
 
   collection(name: string): CollectionStore {
     if (this.closed) throw new Error('Store is closed');
     if (!this.stores[name]) {
-      this.stores[name] = new MemoryCollectionStore(name);
+      this.stores[name] = new S3CollectionStore(name, this.bucket);
     }
     return this.stores[name];
   }
@@ -20,6 +25,5 @@ export class MemoryStore implements DbStore {
         await (store as any).close();
       }
     }
-    this.stores = {}; // Remove all store objects to start fresh
   }
 }
