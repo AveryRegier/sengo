@@ -108,6 +108,11 @@ export class S3CollectionStore implements CollectionStore {
     return results;
   }
 
+  async createIndex(keys: Record<string, any>, options?: Record<string, any>) {
+    // Noop for now
+    return;
+  }
+
   async close() {
     this.closed = true;
   }

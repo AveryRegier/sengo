@@ -28,4 +28,9 @@ export class MemoryCollectionStore implements CollectionStore {
   async close() {
     this.closed = true;
   }
+
+  async createIndex(keys: Record<string, any>, options?: Record<string, any>) {
+    // Noop for now
+    return;
+  }
 }

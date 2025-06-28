@@ -20,4 +20,15 @@ export class SengoCollection {
   async find(query: Record<string, any>) {
     return this.store.find(query);
   }
+
+  async createIndex(keys: Record<string, 1 | -1 | 'text'>, options?: Record<string, any>) {
+    // Forward to store, but for now just a noop
+    await this.store.createIndex?.(keys, options);
+    // MongoDB returns the index name as a string
+    // We'll mimic that: e.g. 'field1_1_field2_-1'
+    const name = Object.entries(keys)
+      .map(([k, v]) => `${k}_${v}`)
+      .join('_');
+    return name;
+  }
 }
