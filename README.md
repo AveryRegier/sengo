@@ -2,8 +2,8 @@
 
 This repository contains:
 
-- **client/**: The Sengo MongoDB-like client library (TypeScript, Node.js)
-- **shell/**: An interactive shell for using the Sengo client
+- **client/**: The Sengo MongoDB-like client library (TypeScript, Node.js) ([client/README.md](client/README.md))
+- **shell/**: An interactive shell for using the Sengo client ([shell/README.md](shell/README.md))
 
 ## Getting Started
 
@@ -46,4 +46,4 @@ This repository contains:
 
 ---
 
-For more information, see the individual `README.md` files in each package.
+For more information, see the individual [client/README.md](client/README.md) and [shell/README.md](shell/README.md) files in each package.
