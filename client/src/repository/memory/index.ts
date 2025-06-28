@@ -1,5 +1,5 @@
-import { MemoryStore } from './memoryStore';
+import { MemoryStore } from './memoryStore.js';
 
-export { MemoryCollectionStore } from './memoryCollectionStore';
+export { MemoryCollectionStore } from './memoryCollectionStore.js';
 
 export { MemoryStore };

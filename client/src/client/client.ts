@@ -1,5 +1,6 @@
-import { DbStore, createRepository } from '../repository';
-import { SengoCollection } from './collection';
+import type { DbStore } from '../repository/index.js';
+import { createRepository } from '../repository/index.js';
+import { SengoCollection } from './collection.js';
 
 export class SengoClient {
   private dbStore: DbStore;

@@ -1,4 +1,4 @@
-import { CollectionStore } from '../index';
+import type { CollectionStore } from '../index.js';
 import {
   S3Client,
   PutObjectCommand,

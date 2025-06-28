@@ -1,5 +1,5 @@
-import { CollectionStore } from '../index';
-import { S3CollectionStore } from './s3CollectionStore';
+import type { CollectionStore } from '../index.js';
+import { S3CollectionStore } from './s3CollectionStore.js';
 
 export class S3Store {
   private bucket: string;

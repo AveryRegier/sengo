@@ -1,4 +1,4 @@
-import { CollectionStore } from '../index';
+import type { CollectionStore } from '../index.js';
 
 export class MemoryCollectionStore implements CollectionStore {
   private documents: Record<string, any>[] = [];

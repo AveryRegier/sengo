@@ -1,9 +1,10 @@
-import { CollectionStore } from '../repository';
+import type { CollectionStore } from '../repository/index.js';
 
 export class SengoCollection {
-  static collections: Record<string, SengoCollection> = {};
-  private store: CollectionStore;
   name: string;
+  store: CollectionStore;
+  static collections: Record<string, SengoCollection> = {};
+
   constructor(name: string, store: CollectionStore) {
     this.name = name;
     this.store = store;
