@@ -2,6 +2,7 @@
 // Build a clean distributable for the sengo client: code + minimal package.json (CommonJS version)
 const fs = require('fs');
 const path = require('path');
+const semver = require('semver');
 
 const clientRoot = __dirname;
 const distDir = path.resolve(__dirname, 'dist');
@@ -28,18 +29,33 @@ copyDir(buildDir, path.join(distDir, 'build'));
 copyDir(buildCjsDir, path.join(distDir, 'build-cjs'));
 copyDir(typesDir, path.join(distDir, 'build', 'types'));
 
+// Parse bump argument (e.g., --bump=patch)
+const bumpArg = process.argv.find(arg => arg.startsWith('--bump='));
+const bumpType = bumpArg ? bumpArg.split('=')[1] : null;
+
 // Write minimal package.json
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+let version = semver.valid(pkg.version) ? semver.clean(pkg.version) : '1.0.0';
+if (bumpType && ['patch', 'minor', 'major'].includes(bumpType)) {
+  const newVersion = semver.inc(version, bumpType);
+  if (newVersion) {
+    version = newVersion;
+    pkg.version = newVersion;
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
+    console.log(`Bumped version to ${newVersion}`);
+  }
+}
 const minimalPkg = {
   name: pkg.name,
-  version: pkg.version,
+  version,
   description: pkg.description,
   type: pkg.type,
   main: pkg.main,
   module: pkg.module,
   exports: pkg.exports,
   types: pkg.types,
-  dependencies: pkg.dependencies,
+  // Only include runtime dependencies, not build tools like semver
+  dependencies: Object.fromEntries(Object.entries(pkg.dependencies || {}).filter(([k]) => k !== 'semver')),
   peerDependencies: pkg.peerDependencies,
   keywords: pkg.keywords,
   author: pkg.author,
