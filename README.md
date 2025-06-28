@@ -8,15 +8,19 @@ Sengo is an open source clean room implementation of a useful subset of the Mong
 - Written in TypeScript for Node.js
 
 ## Getting Started
-1. Install dependencies:
+1. Move to the 'client' directory.
+2. Install dependencies:
    ```sh
    npm install
    ```
-2. Build the project:
+3. Build the project:
    ```sh
-   npx tsc
+   npm run build
    ```
-3. Start developing your library in the `src` directory.
+4. Run the tests
+   ```sh
+   npm run tests
+   ```
 
 ## Usage Example
 
