@@ -10,7 +10,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.S3CollectionStore = void 0;
-const bson_1 = require("bson");
 const client_s3_1 = require("@aws-sdk/client-s3");
 class S3CollectionStore {
     constructor(collection, bucket, opts) {
@@ -23,16 +22,16 @@ class S3CollectionStore {
         return __awaiter(this, void 0, void 0, function* () {
             if (this.closed)
                 throw new Error('Store is closed');
-            const _id = doc._id || new bson_1.ObjectId();
+            const _id = doc._id; // _id must be present, collection is responsible
             const key = `${this.collection}/data/${_id}.json`;
-            const body = JSON.stringify(Object.assign(Object.assign({}, doc), { _id }));
+            const body = JSON.stringify(doc);
             yield this.s3.send(new client_s3_1.PutObjectCommand({
                 Bucket: this.bucket,
                 Key: key,
                 Body: body,
                 ContentType: 'application/json',
             }));
-            return { acknowledged: true, insertedId: _id };
+            // No MongoDB-style response here; just return void
         });
     }
     find(query) {

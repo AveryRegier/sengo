@@ -27,10 +27,8 @@ describe('S3CollectionStore', () => {
   it('should insert a document successfully', async () => {
     mockSend.mockResolvedValueOnce({});
     const store = new S3CollectionStore(collection, bucket, opts);
-    const doc = { name: 'fuzzy', kind: 'cat' };
-    const result = await store.insertOne(doc);
-    expect(result.acknowledged).toBe(true);
-    expect(result.insertedId).toBeDefined();
+    const doc = { _id: 'testid', name: 'fuzzy', kind: 'cat' }; // _id is now required
+    await store.insertOne(doc); // No result to check
     expect(mockSend).toHaveBeenCalledWith(expect.any(PutObjectCommand));
   });
 

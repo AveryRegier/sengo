@@ -34,17 +34,16 @@ export class S3CollectionStore implements CollectionStore {
 
   async insertOne(doc: Record<string, any>) {
     if (this.closed) throw new Error('Store is closed');
-    const _id = doc._id || new ObjectId();
+    const _id = doc._id; // _id must be present, collection is responsible
     const key = `${this.collection}/data/${_id}.json`;
-    const body = JSON.stringify({ ...doc, _id });
+    const body = JSON.stringify(doc);
     await this.s3.send(new PutObjectCommand({
       Bucket: this.bucket,
       Key: key,
       Body: body,
       ContentType: 'application/json',
     }));
-   
-    return { acknowledged: true, insertedId: _id };
+    // No MongoDB-style response here; just return void
   }
 
   async find(query: Record<string, any>) {

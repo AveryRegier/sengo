@@ -31,10 +31,8 @@ describe('S3CollectionStore', () => {
     it('should insert a document successfully', () => __awaiter(void 0, void 0, void 0, function* () {
         mockSend.mockResolvedValueOnce({});
         const store = new s3CollectionStore_1.S3CollectionStore(collection, bucket, opts);
-        const doc = { name: 'fuzzy', kind: 'cat' };
-        const result = yield store.insertOne(doc);
-        expect(result.acknowledged).toBe(true);
-        expect(result.insertedId).toBeDefined();
+        const doc = { _id: 'testid', name: 'fuzzy', kind: 'cat' }; // _id is now required
+        yield store.insertOne(doc); // No result to check
         expect(mockSend).toHaveBeenCalledWith(expect.any(client_s3_1.PutObjectCommand));
     }));
     it('should find a document by _id successfully', () => __awaiter(void 0, void 0, void 0, function* () {

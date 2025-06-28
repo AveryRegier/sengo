@@ -1,4 +1,5 @@
 import type { CollectionStore } from '../repository/index';
+import { ObjectId } from 'bson';
 
 export class SengoCollection {
   name: string;
@@ -11,7 +12,9 @@ export class SengoCollection {
   }
 
   async insertOne(doc: Record<string, any>) {
-    return this.store.insertOne(doc);
+    const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
+    await this.store.insertOne(docWithId);
+    return { acknowledged: true, insertedId: docWithId._id };
   }
 
   async find(query: Record<string, any>) {

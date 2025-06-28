@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SengoCollection = void 0;
+const bson_1 = require("bson");
 class SengoCollection {
     constructor(name, store) {
         this.name = name;
@@ -17,7 +18,9 @@ class SengoCollection {
     }
     insertOne(doc) {
         return __awaiter(this, void 0, void 0, function* () {
-            return this.store.insertOne(doc);
+            const docWithId = doc._id ? doc : Object.assign(Object.assign({}, doc), { _id: new bson_1.ObjectId() });
+            yield this.store.insertOne(docWithId);
+            return { acknowledged: true, insertedId: docWithId._id };
         });
     }
     find(query) {

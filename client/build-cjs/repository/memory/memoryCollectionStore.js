@@ -10,7 +10,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MemoryCollectionStore = void 0;
-const bson_1 = require("bson");
 class MemoryCollectionStore {
     constructor(name) {
         this.documents = [];
@@ -19,10 +18,8 @@ class MemoryCollectionStore {
     }
     insertOne(doc) {
         this.checkClosure();
-        const _id = doc._id || new bson_1.ObjectId();
-        const document = Object.assign(Object.assign({}, doc), { _id });
-        this.documents.push(document);
-        return { acknowledged: true, insertedId: _id };
+        this.documents.push(doc);
+        // No MongoDB-style response here; just return void
     }
     checkClosure() {
         if (this.closed)

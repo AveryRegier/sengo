@@ -1,5 +1,4 @@
 import type { CollectionStore } from '../index';
-import { ObjectId } from 'bson';
 
 export class MemoryCollectionStore implements CollectionStore {
   private documents: Record<string, any>[] = [];
@@ -11,10 +10,8 @@ export class MemoryCollectionStore implements CollectionStore {
 
   insertOne(doc: Record<string, any>) {
     this.checkClosure();
-    const _id = doc._id || new ObjectId();
-    const document = { ...doc, _id };
-    this.documents.push(document);
-    return { acknowledged: true, insertedId: _id };
+    this.documents.push(doc);
+    // No MongoDB-style response here; just return void
   }
 
   private checkClosure() {
