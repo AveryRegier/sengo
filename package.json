@@ -9,5 +9,9 @@
     "build": "npm run build --workspace=client && npm run build --workspace=shell",
     "clean": "npm run clean --workspace=client && npm run clean --workspace=shell",
     "start": "npm run start --workspace=shell"
+  },
+  "dependencies": {
+    "@types/bson": "^4.0.5",
+    "bson": "^6.10.4"
   }
 }

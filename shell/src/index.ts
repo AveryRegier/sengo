@@ -1,7 +1,6 @@
 import readline from 'readline';
 import { SengoClient } from 'sengo-client/src/client/client';
-// @ts-ignore
-const EJSON = require('mongodb-extended-json');
+import { EJSON } from 'bson';
 
 let client: SengoClient | null = null;
 let currentCollection: any = null;
