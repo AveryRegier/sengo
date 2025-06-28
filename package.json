@@ -1,0 +1,13 @@
+{
+  "name": "sengo-monorepo",
+  "private": true,
+  "workspaces": [
+    "client",
+    "shell"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=client && npm run build --workspace=shell",
+    "clean": "npm run clean --workspace=client && npm run clean --workspace=shell",
+    "start": "npm run start --workspace=shell"
+  }
+}

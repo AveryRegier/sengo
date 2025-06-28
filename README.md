@@ -1,43 +1,49 @@
-# Sengo
+# Sengo Monorepo
 
-Sengo is an open source clean room implementation of a useful subset of the MongoDB client for Node.js, using AWS S3 as a backend for document storage.
+This repository contains:
 
-## Features
-- MongoDB-like API for document operations
-- AWS S3 as the storage backend
-- Written in TypeScript for Node.js
+- **client/**: The Sengo MongoDB-like client library (TypeScript, Node.js)
+- **shell/**: An interactive shell for using the Sengo client
 
 ## Getting Started
-1. Move to the 'client' directory.
-2. Install dependencies:
+
+1. **Install dependencies for all packages:**
+
    ```sh
    npm install
    ```
-3. Build the project:
+
+2. **Build all packages:**
+
    ```sh
    npm run build
    ```
-4. Run the tests
+
+3. **Clean all build outputs:**
+
    ```sh
-   npm run tests
+   npm run clean
    ```
 
-## Usage Example
+4. **Start the interactive shell:**
 
-```typescript
-import { SengoClient } from 'sengo';
+   ```sh
+   npm start
+   ```
 
-const client = new SengoClient();
-const collection = client.db().collection('animals');
+   This will launch the shell in the `shell` package.
 
-// Insert a document
-const insertResult = await collection.insertOne({ name: 'fuzzy', kind: 'cat' });
-console.log('Inserted ID:', insertResult.insertedId);
+## Usage
 
-// Find a document by _id
-const found = await collection.find({ _id: insertResult.insertedId });
-console.log('Found:', found);
-```
+- To use the shell interactively:
 
-## License
-Apache 2.0
+  ```sh
+  cd shell
+  npm start
+  ```
+
+- To use the client library, see `client/README.md` for details.
+
+---
+
+For more information, see the individual `README.md` files in each package.
