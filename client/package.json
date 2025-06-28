@@ -19,12 +19,13 @@
     "build:esm:fix": "npm run build:esm && npm run postbuild:fix-extensions",
     "postbuild:fix-extensions": "node ./postbuild-fix-extensions.cjs",
     "test": "jest",
-    "clean": "rimraf build build-cjs *.tsbuildinfo",
-    "verify": "npm run clean && npm run build && npm test"
+    "clean": "rimraf build build-cjs dist *.tsbuildinfo",
+    "verify": "npm run clean && npm run build && npm test",
+    "build:dist": "node ./build-dist.cjs"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "devDependencies": {
     "@types/chance": "^1.1.6",
     "@types/jest": "^30.0.0",
