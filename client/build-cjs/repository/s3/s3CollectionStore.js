@@ -103,6 +103,12 @@ class S3CollectionStore {
             return results;
         });
     }
+    createIndex(keys, options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            // Noop for now
+            return;
+        });
+    }
     close() {
         return __awaiter(this, void 0, void 0, function* () {
             this.closed = true;

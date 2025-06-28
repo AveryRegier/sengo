@@ -28,6 +28,19 @@ class SengoCollection {
             return this.store.find(query);
         });
     }
+    createIndex(keys, options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, _b;
+            // Forward to store, but for now just a noop
+            yield ((_b = (_a = this.store).createIndex) === null || _b === void 0 ? void 0 : _b.call(_a, keys, options));
+            // MongoDB returns the index name as a string
+            // We'll mimic that: e.g. 'field1_1_field2_-1'
+            const name = Object.entries(keys)
+                .map(([k, v]) => `${k}_${v}`)
+                .join('_');
+            return name;
+        });
+    }
 }
 exports.SengoCollection = SengoCollection;
 SengoCollection.collections = {};

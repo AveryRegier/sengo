@@ -36,5 +36,11 @@ class MemoryCollectionStore {
             this.closed = true;
         });
     }
+    createIndex(keys, options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            // Noop for now
+            return;
+        });
+    }
 }
 exports.MemoryCollectionStore = MemoryCollectionStore;
