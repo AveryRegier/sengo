@@ -7,7 +7,7 @@
   "scripts": {
     "start": "cd ../client && npm run build:esm:fix && cd ../shell && node ./dist/index.js",
     "build": "tsc",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist ./src/**/*.js",
     "test": "cd ../client && npm run build:esm:fix && cd ../shell && vitest run",
     "verify": "npm run clean && npm run build && npm test"
   },

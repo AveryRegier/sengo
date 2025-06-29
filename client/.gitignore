@@ -3,6 +3,7 @@ build
 dist
 client-dist
 build-cjs
+src/**/*.js
 
 # Logs
 logs
