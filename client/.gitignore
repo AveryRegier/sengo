@@ -2,6 +2,7 @@
 build
 dist
 client-dist
+build-cjs
 
 # Logs
 logs

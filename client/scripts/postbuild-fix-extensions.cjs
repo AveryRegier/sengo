@@ -18,5 +18,5 @@ function rewriteFileExtensions(dir) {
   }
 }
 
-const buildDir = path.resolve(__dirname, 'build');
+const buildDir = path.resolve(__dirname, '..', 'build');
 rewriteFileExtensions(buildDir);

@@ -17,11 +17,11 @@
     "build:cjs": "tsc --project tsconfig.cjs.json",
     "build": "npm run build:esm && npm run build:cjs",
     "build:esm:fix": "npm run build:esm && npm run postbuild:fix-extensions",
-    "postbuild:fix-extensions": "node ./postbuild-fix-extensions.cjs",
+    "postbuild:fix-extensions": "node ./scripts/postbuild-fix-extensions.cjs",
     "test": "jest",
     "clean": "rimraf build build-cjs dist *.tsbuildinfo",
     "verify": "npm run clean && npm run build && npm test",
-    "build:dist": "node ./build-dist.cjs",
+    "build:dist": "node ./scripts/build-dist.cjs",
     "dist:bump:patch": "npm run build:dist -- --bump=patch",
     "dist:bump:minor": "npm run build:dist -- --bump=minor",
     "dist:bump:major": "npm run build:dist -- --bump=major"
