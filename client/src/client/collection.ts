@@ -40,11 +40,26 @@ export class SengoCollection {
 
 
 
-    this.find({}).then((records) => {
+    await this.find({}).then((records) => {
       records.forEach(record => {
         // Insert the index document into the index collection
         // add each existing record to an index document
-        {FileSystemDirectoryHandle, o}normalizedKeys[0].field;
+        const {field, order} = normalizedKeys[0];
+        const value = record[field];
+        if(value) {
+          // this is indexable.  If there is no value, we skip it
+          indexCollection.find({ _id: value }).then((indexRecord) => {
+            if (!indexRecord) {
+              // If the index record doesn't exist, create it
+              return indexCollection.insertOne({ key: value, index: [record._id] });
+            } else {
+              // If the index record exists, update it
+              return indexCollection.updateOne({ key: value }, { index: [...indexRecord.index, record._id] });
+            }
+          });
+        }
+
+
 
         const keys = keysArray.length > 0 ? keysArray : Object.keys(record).filter(k => k !== '_id');
         // Create an index document for each record
