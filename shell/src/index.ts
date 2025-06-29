@@ -3,7 +3,66 @@ import { SengoClient } from 'sengo-client';
 import { EJSON } from 'bson';
 
 interface ShellCommand {
-  (args: string[], shell: SengoShell): Promise<void> | void;
+  name: string;
+  description: string;
+  run(args: string[], shell: SengoShell): Promise<void> | void;
+}
+
+class ConnectCommand implements ShellCommand {
+  name = 'connect';
+  description = 'Connect to a repository. Usage: connect <repositoryType>';
+  async run(args: string[], shell: SengoShell) {
+    const [repoType] = args;
+    if (shell.client) {
+      console.log('Already connected. Please close the current client first.');
+    } else {
+      shell.client = new SengoClient(repoType || 'memory');
+      shell.currentCollection = null;
+      console.log(`Connected to repository: ${repoType || 'memory'}`);
+    }
+  }
+}
+
+class CloseCommand implements ShellCommand {
+  name = 'close';
+  description = 'Close the current client connection.';
+  async run(_args: string[], shell: SengoShell) {
+    if (shell.client) {
+      await shell.client.close();
+      shell.client = null;
+      shell.currentCollection = null;
+      console.log('Client closed.');
+    } else {
+      console.log('No client to close.');
+    }
+  }
+}
+
+class UseCommand implements ShellCommand {
+  name = 'use';
+  description = 'Select a collection. Usage: use <collectionName>';
+  async run(args: string[], shell: SengoShell) {
+    const [collectionName] = args;
+    if (!shell.client) {
+      console.log('Not connected. Use connect <repositoryType> first.');
+    } else if (!collectionName) {
+      console.log('Usage: use <collectionName>');
+    } else {
+      shell.currentCollection = shell.client.db().collection(collectionName);
+      console.log(`Using collection: ${collectionName}`);
+    }
+  }
+}
+
+class ExitCommand implements ShellCommand {
+  name = 'exit';
+  description = 'Exit the Sengo shell.';
+  async run(_args: string[], shell: SengoShell) {
+    if (shell.client) await shell.client.close();
+    console.log('Goodbye!');
+    shell.rl.close();
+    process.exit(0);
+  }
 }
 
 class SengoShell {
@@ -14,8 +73,17 @@ class SengoShell {
     output: process.stdout,
     prompt: 'sengo> '
   });
+  commands: Record<string, ShellCommand>;
 
   constructor() {
+    const exitCommand = new ExitCommand();
+    this.commands = {
+      connect: new ConnectCommand(),
+      close: new CloseCommand(),
+      use: new UseCommand(),
+      exit: exitCommand,
+      quit: exitCommand,
+    };
     console.log('Welcome to the Sengo shell! Type "connect <repositoryType>" to begin.');
     this.rl.prompt();
     this.rl.on('line', this.handleLine.bind(this)).on('close', this.handleClose.bind(this));
@@ -28,9 +96,27 @@ class SengoShell {
       return;
     }
     const [command, ...rest] = input.split(/\s+/);
-    const cmd = this.commands[command] || this.defaultCommand;
+    // Always check for shell commands first (exit/quit/etc)
+    if (command === 'exit' || command === 'quit') {
+      try {
+        await this.commands[command].run(rest, this);
+      } catch (err: any) {
+        console.error('Error:', err.message);
+      }
+      return;
+    }
+    if (this.commands[command]) {
+      try {
+        await this.commands[command].run(rest, this);
+      } catch (err: any) {
+        console.error('Error:', err.message);
+      }
+      this.rl.prompt();
+      return;
+    }
+    // Only call defaultCommand for non-shell commands
     try {
-      await cmd(rest, this);
+      await this.defaultCommand.run([command, ...rest], this);
     } catch (err: any) {
       console.error('Error:', err.message);
     }
@@ -38,9 +124,10 @@ class SengoShell {
   }
 
   async handleClose() {
-    if (this.client) await this.client.close();
-    console.log('Goodbye!');
-    process.exit(0);
+    // Only call exit if not already exiting
+    if (process.exitCode == null) {
+      await this.commands.exit.run([], this);
+    }
   }
 
   parseArgsWithJson(input: string[]): any[] {
@@ -64,41 +151,23 @@ class SengoShell {
     return args;
   }
 
-  commands: Record<string, ShellCommand> = {
-    connect: async ([repoType], shell) => {
-      if (shell.client) {
-        console.log('Already connected. Please close the current client first.');
-      } else {
-        shell.client = new SengoClient(repoType || 'memory');
-        shell.currentCollection = null;
-        console.log(`Connected to repository: ${repoType || 'memory'}`);
+  defaultCommand: ShellCommand = {
+    name: 'default',
+    description: 'Default command handler for collection methods.',
+    run: async (args, shell) => {
+      const [command, ...rest] = args;
+      if (command === 'exit' || command === 'quit') {
+        await shell.commands[command].run(rest, shell);
+        return;
       }
-    },
-    close: async (_, shell) => {
-      if (shell.client) {
-        await shell.client.close();
-        shell.client = null;
-        shell.currentCollection = null;
-        console.log('Client closed.');
-      } else {
-        console.log('No client to close.');
+      if (shell.commands[command]) {
+        await shell.commands[command].run(rest, shell);
+        return;
       }
-    },
-    use: async ([collectionName], shell) => {
-      if (!shell.client) {
-        console.log('Not connected. Use connect <repositoryType> first.');
-      } else if (!collectionName) {
-        console.log('Usage: use <collectionName>');
-      } else {
-        shell.currentCollection = shell.client.db().collection(collectionName);
-        console.log(`Using collection: ${collectionName}`);
+      if (!shell.currentCollection) {
+        console.log(`Unknown command or method: ${command}`);
+        return;
       }
-    }
-  };
-
-  defaultCommand: ShellCommand = async (args, shell) => {
-    const [command, ...rest] = args;
-    if (shell.currentCollection) {
       const fn = shell.currentCollection[command];
       if (typeof fn === 'function') {
         const parsedArgs = shell.parseArgsWithJson(rest);
@@ -107,10 +176,8 @@ class SengoShell {
           console.log(JSON.stringify(result, null, 2));
         }
       } else {
-        console.log(`Command "${command}" is not a function of the current collection.`);
+        console.log(`Unknown command or method: ${command}`);
       }
-    } else {
-      console.log('No collection selected. Use "use <collectionName>" to select a collection.');
     }
   };
 }
