@@ -81,10 +81,26 @@ class HelpCommand implements ShellCommand {
   }
 }
 
-class SengoShell {
+class DebugCommand implements ShellCommand {
+  name = 'debug';
+  description = 'Enable or disable debug mode. Usage: debug [on|off]';
+  run(args: string[], shell: SengoShell) {
+    const arg = args[0]?.toLowerCase();
+    if (arg === 'off') {
+      shell.debugMode = false;
+      console.log('Debug mode OFF');
+    } else {
+      shell.debugMode = true;
+      console.log('Debug mode ON');
+    }
+  }
+}
+
+export class SengoShell {
   client: SengoClient | null = null;
   currentCollection: any = null;
   exiting = false; // Prevent duplicate exit
+  debugMode = false;
   rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -99,6 +115,7 @@ class SengoShell {
       close: new CloseCommand(),
       use: new UseCommand(),
       help: new HelpCommand(),
+      debug: new DebugCommand(),
       exit: exitCommand,
       quit: exitCommand,
     };
@@ -150,22 +167,47 @@ class SengoShell {
   }
 
   parseArgsWithJson(input: string[]): any[] {
+    // Improved: parse multiple JSON objects from input, even if separated by spaces
     const args: any[] = [];
-    let i = 0;
-    while (i < input.length) {
-      if (input[i].startsWith('{') || input[i].startsWith('[')) {
-        const joined = input.slice(i).join(' ');
-        try {
-          args.push(EJSON.parse(joined));
-          break;
-        } catch (err) {
-          console.error('Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.');
-          return [];
+    let buffer = '';
+    let inJson = false;
+    let braceCount = 0;
+    for (let i = 0; i < input.length; i++) {
+      const token = input[i];
+      if (!inJson && (token.startsWith('{') || token.startsWith('['))) {
+        inJson = true;
+        braceCount = 0;
+        buffer = '';
+      }
+      if (inJson) {
+        buffer += (buffer ? ' ' : '') + token;
+        for (const char of token) {
+          if (char === '{' || char === '[') braceCount++;
+          if (char === '}' || char === ']') braceCount--;
+        }
+        if (braceCount === 0) {
+          // End of JSON object/array
+          try {
+            args.push(EJSON.parse(buffer));
+          } catch (err) {
+            console.error('Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.');
+            return [];
+          }
+          inJson = false;
+          buffer = '';
         }
       } else {
-        args.push(input[i]);
+        args.push(token);
       }
-      i++;
+    }
+    // If buffer is not empty, try to parse last JSON
+    if (buffer) {
+      try {
+        args.push(EJSON.parse(buffer));
+      } catch (err) {
+        console.error('Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.');
+        return [];
+      }
     }
     return args;
   }
@@ -190,6 +232,9 @@ class SengoShell {
       const fn = shell.currentCollection[command];
       if (typeof fn === 'function') {
         const parsedArgs = shell.parseArgsWithJson(rest);
+        if (shell.debugMode) {
+          console.log('[DEBUG] Arguments:', JSON.stringify(parsedArgs, null, 2));
+        }
         const result = await fn.apply(shell.currentCollection, parsedArgs);
         if (result !== undefined) {
           console.log(JSON.stringify(result, null, 2));

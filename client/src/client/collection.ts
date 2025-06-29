@@ -34,6 +34,12 @@ export class SengoCollection {
     // Apply $set only (for now)
     if (update.$set) {
       updatedDoc = { ...updatedDoc, ...update.$set };
+    } else {
+      // If no supported update operator, throw MongoDB-like error
+      throw Object.assign(new Error('Update document must contain update operators (e.g. $set). Full document replacement is not yet supported.'), {
+        code: 9, // MongoDB's FailedToParse
+        name: 'MongoServerError',
+      });
     }
     // Save the updated doc (store-specific)
     if (typeof (this.store as any).updateOne === 'function') {
