@@ -1,7 +1,8 @@
-import type { CollectionStore } from '../index';
+import type { CollectionStore, NormalizedIndexKeyRecord } from '../index';
 
 export class MemoryCollectionStore implements CollectionStore {
   private documents: Record<string, any>[] = [];
+  private indexes: Record<string, NormalizedIndexKeyRecord[]> = {};
   name: string;
   private closed = false;
   constructor(name?: string) {
@@ -12,6 +13,16 @@ export class MemoryCollectionStore implements CollectionStore {
     this.checkClosure();
     this.documents.push(doc);
     // No MongoDB-style response here; just return void
+  }
+
+  updateOne(query: { key: any }, update: { index: any[] }) {
+    this.checkClosure();
+    const doc = this.documents.find(d => d._id === query.key);
+    if (doc) {
+      doc.index = update.index;
+      return doc; // Return the updated document
+    }
+    return null; // If no document matches the query
   }
 
   private checkClosure() {
@@ -29,8 +40,9 @@ export class MemoryCollectionStore implements CollectionStore {
     this.closed = true;
   }
 
-  async createIndex(keys: Record<string, any>, options?: Record<string, any>) {
+  async createIndex(name: string, keys: NormalizedIndexKeyRecord[]) {
+    this.indexes[name] = keys;
     // Noop for now
-    return;
+    return new MemoryCollectionStore(this.name + '/indices/' + name);
   }
 }

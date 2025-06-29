@@ -1,5 +1,4 @@
-import type { CollectionStore } from '../';
-import { ObjectId } from 'bson';
+import type { CollectionStore, IndexKeyRecord } from '../';
 import {
   S3Client,
   PutObjectCommand,
@@ -108,9 +107,13 @@ export class S3CollectionStore implements CollectionStore {
     return results;
   }
 
-  async createIndex(keys: Record<string, any>, options?: Record<string, any>) {
+  async createIndex(name: string, keys: IndexKeyRecord[]) {
     // Noop for now
-    return;
+    new S3CollectionStore(this.collection + "/indices", this.bucket).insertOne({
+      _id: name,
+      keys
+    });
+    return new S3CollectionStore(this.collection+"/indices/"+name, this.bucket);
   }
 
   async close() {
