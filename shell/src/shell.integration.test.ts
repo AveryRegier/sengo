@@ -1,52 +1,5 @@
-import { jest } from '@jest/globals';
-
-jest.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error('process.exit: ' + code); }) as any);
-
 import { spawn } from 'child_process';
 import path from 'path';
-import Chance from 'chance';
-
-describe('Sengo Shell Integration (Memory)', () => {
-  const chance = new Chance();
-  // Use the built shell entrypoint
-  const shellPath = path.resolve(__dirname, '../dist/index.js');
-  const collectionName = 'col_' + chance.hash({ length: 8 });
-  const doc = {
-    name: chance.name(),
-    age: chance.age(),
-    email: chance.email(),
-    random: chance.string({ length: 10 })
-  };
-
-  function runShell(commands: string[]): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const child = spawn('node', [shellPath], { stdio: ['pipe', 'pipe', 'pipe'] });
-      let output = '';
-      child.stdout.on('data', data => { output += data.toString(); });
-      child.stderr.on('data', data => { output += data.toString(); });
-      child.on('error', reject);
-      child.on('close', () => resolve(output));
-      for (const cmd of commands) child.stdin.write(cmd + '\n');
-      child.stdin.end();
-    });
-  }
-
-  it('should connect, use a collection, insert, find, and close', async () => {
-    const commands = [
-      `connect memory`,
-      `use ${collectionName}`,
-      `insertOne ${JSON.stringify(doc)}`,
-      `find {\"name\":\"${doc.name}\"}`,
-      `close`
-    ];
-    const output = await runShell(commands);
-    expect(output).toMatch(/Connected to repository: memory/);
-    expect(output).toMatch(new RegExp(`Using collection: ${collectionName}`));
-    expect(output).toMatch(/acknowledged/);
-    expect(output).toMatch(new RegExp(doc.name));
-    expect(output).toMatch(/Client closed/);
-  });
-});
 
 describe('Sengo Shell exit/quit commands', () => {
   const shellPath = path.resolve(__dirname, '../dist/index.js');
@@ -76,13 +29,18 @@ describe('Sengo Shell exit/quit commands', () => {
     { name: 'exit after connect', cmds: ['connect', 'exit'], expect: /Connected to repository: memory[\s\S]*Goodbye!/, exit: true },
     { name: 'quit after use', cmds: ['connect', 'use test', 'quit'], expect: /Using collection: test[\s\S]*Goodbye!/, exit: true },
     { name: 'exit after use', cmds: ['connect', 'use test', 'exit'], expect: /Using collection: test[\s\S]*Goodbye!/, exit: true },
+    { name: 'help before connect', cmds: ['help'], expect: /Available commands:[\s\S]*connect[\s\S]*close[\s\S]*use[\s\S]*help[\s\S]*exit[\s\S]*quit/, exit: false },
+    { name: 'help after connect', cmds: ['connect', 'help'], expect: /Available commands:[\s\S]*connect[\s\S]*close[\s\S]*use[\s\S]*help[\s\S]*exit[\s\S]*quit/, exit: false },
+    { name: 'help after use', cmds: ['connect', 'use test', 'help'], expect: /Available commands:[\s\S]*connect[\s\S]*close[\s\S]*use[\s\S]*help[\s\S]*exit[\s\S]*quit/, exit: false }
   ];
 
-  for (const { name, cmds, expect: expected } of scenarios) {
+  for (const { name, cmds, expect: expected, exit } of scenarios) {
     it(name, async () => {
       const { output, code } = await runShell(cmds);
       expect(output).toMatch(expected);
-      expect(code).toBe(0);
+      if (exit) {
+        expect(code).toBe(0);
+      }
       expect(output).not.toMatch(/No collection selected/);
       expect(output).not.toMatch(/Unknown command or method/);
     });

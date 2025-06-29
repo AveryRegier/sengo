@@ -65,6 +65,20 @@ class ExitCommand implements ShellCommand {
   }
 }
 
+class HelpCommand implements ShellCommand {
+  name = 'help';
+  description = 'Show help for all commands.';
+  async run(_args: string[], shell: SengoShell) {
+    console.log('Available commands:');
+    for (const cmdName of Object.keys(shell.commands)) {
+      const cmd = shell.commands[cmdName];
+      if (cmd && cmd.description) {
+        console.log(`  ${cmdName.padEnd(8)} - ${cmd.description}`);
+      }
+    }
+  }
+}
+
 class SengoShell {
   client: SengoClient | null = null;
   currentCollection: any = null;
@@ -81,6 +95,7 @@ class SengoShell {
       connect: new ConnectCommand(),
       close: new CloseCommand(),
       use: new UseCommand(),
+      help: new HelpCommand(),
       exit: exitCommand,
       quit: exitCommand,
     };
