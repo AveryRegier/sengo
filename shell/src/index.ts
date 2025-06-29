@@ -58,6 +58,8 @@ class ExitCommand implements ShellCommand {
   name = 'exit';
   description = 'Exit the Sengo shell.';
   async run(_args: string[], shell: SengoShell) {
+    if (shell.exiting) return;
+    shell.exiting = true;
     if (shell.client) await shell.client.close();
     console.log('Goodbye!');
     shell.rl.close();
@@ -82,6 +84,7 @@ class HelpCommand implements ShellCommand {
 class SengoShell {
   client: SengoClient | null = null;
   currentCollection: any = null;
+  exiting = false; // Prevent duplicate exit
   rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -140,7 +143,8 @@ class SengoShell {
 
   async handleClose() {
     // Only call exit if not already exiting
-    if (process.exitCode == null) {
+    if (!this.exiting) {
+      this.exiting = true;
       await this.commands.exit.run([], this);
     }
   }
