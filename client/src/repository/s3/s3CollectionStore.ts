@@ -88,24 +88,45 @@ export class S3CollectionStore implements CollectionStore {
     const results: any[] = [];
     for (const obj of listed.Contents) {
       const key = obj.Key!;
-      const result = await this.s3.send(new GetObjectCommand({
-        Bucket: this.bucket,
-        Key: key,
-      }));
-      const stream = result.Body as Readable;
-      const data = await new Promise<string>((resolve, reject) => {
-        let str = '';
-        stream.on('data', chunk => (str += chunk));
-        stream.on('end', () => resolve(str));
-        stream.on('error', reject);
-      });
-      const parsed = JSON.parse(data);
-      // Compare _id as string for compatibility
-      if (Object.entries(query).every(([k, v]) => parsed[k]?.toString() === v?.toString())) {
-        results.push(parsed);
+      try {
+        const result = await this.s3.send(new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+        }));
+        const stream = result.Body as Readable;
+        const data = await new Promise<string>((resolve, reject) => {
+          let str = '';
+          stream.on('data', chunk => (str += chunk));
+          stream.on('end', () => resolve(str));
+          stream.on('error', reject);
+        });
+        const parsed = JSON.parse(data);
+        // Only push if parsed is an object and has _id
+        if (parsed && typeof parsed === 'object' && parsed._id !== undefined) {
+          if (Object.entries(query).every(([k, v]) => parsed[k]?.toString() === v?.toString())) {
+            results.push(parsed);
+          }
+        }
+      } catch (err) {
+        // Skip this document if any error occurs (missing, invalid JSON, etc)
+        continue;
       }
     }
     return results;
+  }
+
+  async updateOne(filter: Record<string, any>, doc: Record<string, any>) {
+    if (this.closed) throw new Error('Store is closed');
+    // Only support update by _id for now
+    const key = `${this.collection}/data/${filter._id}.json`;
+    // Overwrite the document with the provided doc
+    await this.s3.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: JSON.stringify(doc),
+      ContentType: 'application/json',
+    }));
+    return { matchedCount: 1, modifiedCount: 1 };
   }
 
   async close() {

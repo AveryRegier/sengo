@@ -33,6 +33,7 @@
     "@types/chance": "^1.1.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.0.4",
+    "aws-sdk-client-mock": "^4.1.0",
     "chance": "^1.1.13",
     "jest": "^30.0.3",
     "rimraf": "^3.0.2",

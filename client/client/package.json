@@ -1,0 +1,5 @@
+{
+  "devDependencies": {
+    "aws-sdk-client-mock": "^4.1.0"
+  }
+}

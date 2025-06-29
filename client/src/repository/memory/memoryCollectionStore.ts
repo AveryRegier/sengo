@@ -25,6 +25,15 @@ export class MemoryCollectionStore implements CollectionStore {
     });
   }
 
+  updateOne(filter: Record<string, any>, doc: Record<string, any>) {
+    this.checkClosure();
+    // Only support update by _id for now
+    const idx = this.documents.findIndex(d => d._id?.toString() === filter._id?.toString());
+    if (idx === -1) return { matchedCount: 0, modifiedCount: 0 };
+    this.documents[idx] = { ...doc };
+    return { matchedCount: 1, modifiedCount: 1 };
+  }
+
   async close() {
     this.closed = true;
   }
