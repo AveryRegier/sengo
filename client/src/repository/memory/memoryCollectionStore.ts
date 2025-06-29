@@ -1,4 +1,5 @@
 import type { CollectionStore } from '../index';
+import { ObjectId } from 'bson';
 
 export class MemoryCollectionStore implements CollectionStore {
   private documents: Record<string, any>[] = [];
@@ -8,10 +9,10 @@ export class MemoryCollectionStore implements CollectionStore {
     this.name = name || '';
   }
 
-  insertOne(doc: Record<string, any>) {
-    this.checkClosure();
-    this.documents.push(doc);
-    // No MongoDB-style response here; just return void
+  async insertOne(doc: Record<string, any>) {
+    const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
+    await this.replaceOne({ _id: docWithId._id }, docWithId);
+    return { acknowledged: true, insertedId: docWithId._id };
   }
 
   private checkClosure() {
@@ -34,7 +35,21 @@ export class MemoryCollectionStore implements CollectionStore {
     return { matchedCount: 1, modifiedCount: 1 };
   }
 
+  async replaceOne(filter: Record<string, any>, doc: Record<string, any>) {
+    const idx = this.documents.findIndex(d => d._id === (filter._id ?? doc._id));
+    if (idx !== -1) {
+      this.documents[idx] = { ...doc };
+    } else {
+      this.documents.push({ ...doc });
+    }
+    return Promise.resolve();
+  }
+
   async close() {
     this.closed = true;
+  }
+
+  isClosed() {
+    return this.closed;
   }
 }

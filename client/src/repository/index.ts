@@ -2,7 +2,7 @@ import { MemoryStore } from './memory/index';
 import { S3Store } from './s3/s3Store';
 
 export interface CollectionStore {
-  insertOne(doc: Record<string, any>): Promise<void> | void;
+  replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void>;
   find(query: Record<string, any>): Promise<Record<string, any>[]> | Record<string, any>[];
 }
 

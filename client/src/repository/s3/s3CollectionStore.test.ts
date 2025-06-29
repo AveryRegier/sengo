@@ -1,11 +1,12 @@
 import { S3CollectionStore } from './s3CollectionStore';
 import type { S3CollectionStoreOptions } from './s3CollectionStore';
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { vi, describe, it, expect, beforeEach } from 'vitest';
 
-jest.mock('@aws-sdk/client-s3');
+vi.mock('@aws-sdk/client-s3');
 
-const mockSend = jest.fn();
-(S3Client as jest.Mock).mockImplementation(() => ({ send: mockSend }));
+const mockSend = vi.fn();
+(S3Client as unknown as { mockImplementation: (fn: () => any) => void }).mockImplementation(() => ({ send: mockSend }));
 
 const opts: S3CollectionStoreOptions = { region: 'us-east-1' };
 const bucket = 'test-bucket';
@@ -24,11 +25,11 @@ describe('S3CollectionStore', () => {
     mockSend.mockReset();
   });
 
-  it('should insert a document successfully', async () => {
+  it('should replace (upsert) a document successfully', async () => {
     mockSend.mockResolvedValueOnce({});
     const store = new S3CollectionStore(collection, bucket, opts);
-    const doc = { _id: 'testid', name: 'fuzzy', kind: 'cat' }; // _id is now required
-    await store.insertOne(doc); // No result to check
+    const doc = { _id: 'testid', name: 'fuzzy', kind: 'cat' };
+    await store.replaceOne({ _id: doc._id }, doc);
     expect(mockSend).toHaveBeenCalledWith(expect.any(PutObjectCommand));
   });
 
@@ -59,14 +60,13 @@ describe('S3CollectionStore', () => {
     (error as any).name = 'TimeoutError';
     mockSend.mockRejectedValueOnce(error);
     const store = new S3CollectionStore(collection, bucket, opts);
-    // Should throw a MongoDB-like network error (e.g., MongoNetworkError)
     await expect(store.find({ _id: 'fail' })).rejects.toThrow(/MongoNetworkError|failed to connect|network error/i);
   });
 
   it('should throw Store is closed after close()', async () => {
     const store = new S3CollectionStore(collection, bucket, opts);
     await store.close();
-    await expect(store.insertOne({ name: 'fuzzy' })).rejects.toThrow('Store is closed');
+    await expect(store.replaceOne({ _id: 'fuzzy' }, { name: 'fuzzy' })).rejects.toThrow('Store is closed');
     await expect(store.find({ _id: 'abc' })).rejects.toThrow('Store is closed');
   });
 });

@@ -1,4 +1,5 @@
 import { SengoShell } from './index';
+import { vi } from 'vitest';
 
 describe('SengoShell.parseArgsWithJson', () => {
   let shell: any;
@@ -31,7 +32,7 @@ describe('SengoShell.parseArgsWithJson', () => {
 
   it('returns [] and logs error for invalid JSON', () => {
     const input = ['{"foo":1', '{"bar":2}'];
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
     expect(shell.parseArgsWithJson(input)).toEqual([]);
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();

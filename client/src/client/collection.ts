@@ -12,8 +12,12 @@ export class SengoCollection {
   }
 
   async insertOne(doc: Record<string, any>) {
+    // Check for closed store (if supported)
+    if (typeof (this.store as any).isClosed === 'function' && (this.store as any).isClosed()) {
+      throw new Error('Store is closed');
+    }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
-    await this.store.insertOne(docWithId);
+    await this.store.replaceOne({ _id: docWithId._id }, docWithId);
     return { acknowledged: true, insertedId: docWithId._id };
   }
 
@@ -41,16 +45,8 @@ export class SengoCollection {
         name: 'MongoServerError',
       });
     }
-    // Save the updated doc (store-specific)
-    if (typeof (this.store as any).updateOne === 'function') {
-      await (this.store as any).updateOne({ _id: updatedDoc._id }, updatedDoc);
-    } else {
-      // fallback: remove and re-insert (for memory)
-      if (typeof (this.store as any).removeOne === 'function') {
-        await (this.store as any).removeOne({ _id: updatedDoc._id });
-      }
-      await this.store.insertOne(updatedDoc);
-    }
+    // Save the updated doc
+    await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
   }
 }

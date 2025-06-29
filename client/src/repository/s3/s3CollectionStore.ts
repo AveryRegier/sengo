@@ -32,9 +32,14 @@ export class S3CollectionStore implements CollectionStore {
     });
   }
 
-  async insertOne(doc: Record<string, any>) {
+  isClosed() {
+    return this.closed;
+  }
+
+  async replaceOne(filter: Record<string, any>, doc: Record<string, any>) {
     if (this.closed) throw new Error('Store is closed');
-    const _id = doc._id; // _id must be present, collection is responsible
+    const _id = filter._id ?? doc._id;
+    if (!_id) throw new Error('replaceOne requires _id');
     const key = `${this.collection}/data/${_id}.json`;
     const body = JSON.stringify(doc);
     await this.s3.send(new PutObjectCommand({
@@ -113,20 +118,6 @@ export class S3CollectionStore implements CollectionStore {
       }
     }
     return results;
-  }
-
-  async updateOne(filter: Record<string, any>, doc: Record<string, any>) {
-    if (this.closed) throw new Error('Store is closed');
-    // Only support update by _id for now
-    const key = `${this.collection}/data/${filter._id}.json`;
-    // Overwrite the document with the provided doc
-    await this.s3.send(new PutObjectCommand({
-      Bucket: this.bucket,
-      Key: key,
-      Body: JSON.stringify(doc),
-      ContentType: 'application/json',
-    }));
-    return { matchedCount: 1, modifiedCount: 1 };
   }
 
   async close() {

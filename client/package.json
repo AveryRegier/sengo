@@ -18,7 +18,8 @@
     "build": "npm run build:esm && npm run build:cjs",
     "build:esm:fix": "npm run build:esm && npm run postbuild:fix-extensions",
     "postbuild:fix-extensions": "node ./scripts/postbuild-fix-extensions.cjs",
-    "test": "jest",
+    "test": "vitest run",
+    "test:ui": "vitest",
     "clean": "rimraf build build-cjs dist *.tsbuildinfo",
     "verify": "npm run clean && npm run build && npm test",
     "build:dist": "node ./scripts/build-dist.cjs",
@@ -31,14 +32,14 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/chance": "^1.1.6",
-    "@types/jest": "^30.0.0",
     "@types/node": "^24.0.4",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
     "aws-sdk-client-mock": "^4.1.0",
     "chance": "^1.1.13",
-    "jest": "^30.0.3",
     "rimraf": "^3.0.2",
-    "ts-jest": "^29.4.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.839.0",
