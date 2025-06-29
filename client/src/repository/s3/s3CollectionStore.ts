@@ -17,6 +17,16 @@ export interface S3CollectionStoreOptions {
   };
 }
 
+export type Order = 1 | -1 | 'text';
+export type IndexKeyRecord = Record<string, Order>;
+export type IndexDefinition = string | IndexKeyRecord;
+export type NormalizedIndexKeyRecord = { field: string, order: Order };
+
+export interface CollectionIndex {
+  name: string;
+  keys: NormalizedIndexKeyRecord[];
+}
+
 export class S3CollectionStore implements CollectionStore {
   private s3: S3Client;
   private bucket: string;
@@ -118,6 +128,42 @@ export class S3CollectionStore implements CollectionStore {
       }
     }
     return results;
+  }
+
+  private normalizeIndexKeys(keys: IndexDefinition | IndexDefinition[]): NormalizedIndexKeyRecord[] {
+    if (!keys) {
+      throw new Error('Keys must be defined for creating an index');
+    }
+    let keysArray: IndexDefinition[];
+    if (!Array.isArray(keys)) {
+      keysArray = [keys];
+    } else {
+      keysArray = keys;
+    }
+    const normalizedKeys = keysArray.map((key) => {
+      if (typeof key === 'string') {
+        return [{ field: key, order: 1 as Order }];
+      } else if (typeof key === 'object') {
+        return Object.entries(key as IndexKeyRecord).map(([field, order]) => ({ field, order }));
+      } else {
+        throw new Error('Invalid index key format');
+      }
+    }).flat();
+    return normalizedKeys;
+  }
+
+  async createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex> {
+    if (this.closed) throw new Error('Store is closed');
+    const index: CollectionIndex = { name, keys };
+    const key = `${this.collection}/indices/${name}.json`;
+    const body = JSON.stringify(index);
+    await this.s3.send(new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: body,
+      ContentType: 'application/json',
+    }));
+    return index;
   }
 
   async close() {

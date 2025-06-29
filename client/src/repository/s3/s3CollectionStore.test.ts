@@ -1,6 +1,6 @@
 import { S3CollectionStore } from './s3CollectionStore';
 import type { S3CollectionStoreOptions } from './s3CollectionStore';
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 vi.mock('@aws-sdk/client-s3');
@@ -66,7 +66,7 @@ describe('S3CollectionStore', () => {
   it('should throw Store is closed after close()', async () => {
     const store = new S3CollectionStore(collection, bucket, opts);
     await store.close();
-    await expect(store.replaceOne({ _id: 'fuzzy' }, { name: 'fuzzy' })).rejects.toThrow('Store is closed');
+    await expect(store.replaceOne({ _id: 'fuzzy' }, { _id: 'fuzzy', name: 'fuzzy' })).rejects.toThrow('Store is closed');
     await expect(store.find({ _id: 'abc' })).rejects.toThrow('Store is closed');
   });
 });
