@@ -1,6 +1,7 @@
 # build artifacts
 build
 dist
+build-cjs
 
 # Logs
 logs
@@ -138,3 +139,17 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Ignore all build output and generated files
+build/
+build-cjs/
+dist/
+*.tsbuildinfo
+
+# Ignore generated JS and map files in src
+client/src/**/*.js
+client/src/**/*.js.map
+client/src/**/*.d.ts
+shell/src/**/*.js
+shell/src/**/*.js.map
+shell/src/**/*.d.ts
