@@ -78,6 +78,18 @@ class HelpCommand implements ShellCommand {
         console.log(`  ${cmdName.padEnd(8)} - ${cmd.description}`);
       }
     }
+    // Show dynamic collection methods if a collection is selected
+    if (shell.currentCollection) {
+      const proto = Object.getPrototypeOf(shell.currentCollection);
+      const methodNames = Object.getOwnPropertyNames(proto)
+        .filter(name => typeof shell.currentCollection[name] === 'function' && name !== 'constructor');
+      if (methodNames.length) {
+        console.log('\nCollection methods:');
+        for (const name of methodNames) {
+          console.log(`  ${name}`);
+        }
+      }
+    }
   }
 }
 
