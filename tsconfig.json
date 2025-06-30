@@ -8,5 +8,6 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true
   },
-  "include": ["client/src/**/*", "shell/src/**/*"]
+  "include": ["client/src/**/*", "shell/src/**/*"],
+  "exclude": ["**/*.test.ts", "**/*.spec.ts", "tests/**/*"]
 }

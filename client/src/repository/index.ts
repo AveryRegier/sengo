@@ -18,3 +18,10 @@ export function createRepository(name: string): DbStore {
     return new MemoryStore();
   }
 }
+
+export * from './collectionIndex';
+
+export type Order = 1 | -1 | 'text';
+export type IndexKeyRecord = Record<string, Order>;
+export type IndexDefinition = string | IndexKeyRecord;
+export type NormalizedIndexKeyRecord = { field: string, order: Order };
