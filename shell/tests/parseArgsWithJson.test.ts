@@ -1,5 +1,5 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { SengoShell } from '../src/index';
-import { vi } from 'vitest';
 
 describe('SengoShell.parseArgsWithJson', () => {
   let shell: any;
