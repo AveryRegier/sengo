@@ -73,3 +73,25 @@ export abstract class CollectionIndex {
     return out;
   }
 }
+
+export function normalizeIndexKeys(keys: IndexDefinition | IndexDefinition[]): NormalizedIndexKeyRecord[] {
+    if (!keys) {
+      throw new Error('Keys must be defined for creating an index');
+    }
+    let keysArray: IndexDefinition[];
+    if (!Array.isArray(keys)) {
+      keysArray = [keys];
+    } else {
+      keysArray = keys;
+    }
+    const normalizedKeys = keysArray.map((key) => {
+      if (typeof key === 'string') {
+        return [{ field: key, order: 1 as Order }];
+      } else if (typeof key === 'object') {
+        return Object.entries(key as IndexKeyRecord).map(([field, order]) => ({ field, order }));
+      } else {
+        throw new Error('Invalid index key format');
+      }
+    }).flat();
+    return normalizedKeys;
+  }

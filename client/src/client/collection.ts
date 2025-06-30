@@ -1,4 +1,4 @@
-import type { CollectionStore } from '../repository/index';
+import { normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 
 export class SengoCollection {
@@ -51,8 +51,9 @@ export class SengoCollection {
   }
 
   async createIndex(keys: Record<string, 1 | -1 | 'text'>): Promise<string> {
-    // Simulate MongoDB's createIndex: return a string index name
-    const fields = Object.keys(keys).map(k => `${k}_${keys[k]}`).join('_');
+    const normalizedKeys = normalizeIndexKeys(keys);
+    // MongoDB-like index name: e.g. { name: 1, age: -1 } => 'name_1_age_-1'
+    const fields = normalizedKeys.map(({ field, order }) => `${field}_${order}`).join('_');
     return Promise.resolve(fields || 'default_index');
   }
 }
