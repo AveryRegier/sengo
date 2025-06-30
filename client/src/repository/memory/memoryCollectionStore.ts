@@ -60,7 +60,12 @@ export class MemoryCollectionStore implements CollectionStore {
   }
 
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
-    // For demo, just return a new MemoryCollectionIndex
-    return new MemoryCollectionIndex(name, keys);
+    this.checkClosure();
+    const index = new MemoryCollectionIndex(name, keys);
+    // Add all current documents to the index
+    for (const doc of this.documents) {
+      await index.addDocument(doc);
+    }
+    return index;
   }
 }

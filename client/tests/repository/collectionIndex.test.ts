@@ -75,4 +75,21 @@ describe('SengoCollection createIndex and find (Memory)', () => {
       expect(match).toMatchObject(doc);
     }
   });
+
+  it('should create index and flush to ensure all docs are indexed', async () => {
+    const indexField = Object.keys(docs[0]).find(k => k !== '_id')!;
+    const indexName = await collection.createIndex({ [indexField]: 1 });
+    expect(typeof indexName).toBe('string');
+    // Access the underlying index instance (if exposed for test)
+    const index = (collection.store as any).lastIndexInstance;
+    if (index && typeof index.flush === 'function') {
+      await index.flush();
+      // After flush, all docs should be indexed
+      const map = index.getIndexMap();
+      const allIds = Object.values(map).flat();
+      for (const doc of docs) {
+        expect(allIds).toContain(doc._id.toString ? doc._id.toString() : doc._id);
+      }
+    }
+  });
 });

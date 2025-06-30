@@ -54,6 +54,22 @@ export class SengoCollection {
     const normalizedKeys = normalizeIndexKeys(keys);
     // MongoDB-like index name: e.g. { name: 1, age: -1 } => 'name_1_age_-1'
     const fields = normalizedKeys.map(({ field, order }) => `${field}_${order}`).join('_');
-    return Promise.resolve(fields || 'default_index');
+    // Actually create the index in the store
+    const index = await this.store.createIndex(fields || 'default_index', normalizedKeys);
+    // Build the index here (assume contract is always fulfilled)
+    console.log(`[SengoCollection] Calling this.store.find({}) after index creation for index '${fields || 'default_index'}'`);
+    const allDocs = await this.store.find({});
+    console.log(`[SengoCollection] this.store.find({}) returned ${allDocs.length} documents`);
+    for (let i = 0; i < allDocs.length; i++) {
+      const doc = allDocs[i];
+      // If this is the last document and the index has a flush method, call flush after addDocument
+      if (i === allDocs.length - 1 && typeof (index as any).flush === 'function') {
+        await (index as any).addDocument(doc);
+        await (index as any).flush();
+      } else {
+        await (index as any).addDocument(doc);
+      }
+    }
+    return fields || 'default_index';
   }
 }

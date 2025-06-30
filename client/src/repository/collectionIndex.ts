@@ -3,6 +3,8 @@ import { IndexDefinition, IndexKeyRecord, NormalizedIndexKeyRecord, Order } from
 export interface CollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
+  isBusy?(): boolean;
+  getStatus?(): { pendingInserts: number; runningTasks: number; avgPersistMs: number; estTimeToClearMs: number };
 }
 
 export class IndexEntry {
@@ -67,6 +69,21 @@ export abstract class BaseCollectionIndex {
       out[k] = v.toArray();
     }
     return out;
+  }
+
+  /**
+   * Returns all index entries as [key, entry] pairs.
+   */
+  public getAllEntries(): [string, IndexEntry][] {
+    return Array.from(this.indexMap.entries());
+  }
+
+  /**
+   * Wait until all pending persistence is complete. For in-memory, this is immediate.
+   */
+  async flush(): Promise<void> {
+    // No async persistence in memory, so just resolve immediately
+    return;
   }
 }
 

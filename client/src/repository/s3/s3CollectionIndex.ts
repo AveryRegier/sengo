@@ -48,6 +48,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   }
 
   protected async persistEntry(key: string, entry: IndexEntry): Promise<void> {
+    console.log(`[S3CollectionIndex] persistEntry: Persisting entry for key='${key}', ids=[${[...entry.ids].join(',')}]`);
     const s3Key = `${this.collectionName}/indices/${this.name}/${encodeURIComponent(key)}.json`;
     let tryCount = 0;
     while (tryCount < 3) {
@@ -60,17 +61,16 @@ export class S3CollectionIndex extends BaseCollectionIndex {
           ...(entry.etag ? { IfMatch: entry.etag } : {}),
         }));
         entry.dirty = false;
+        console.log(`[S3CollectionIndex] persistEntry: Successfully persisted entry for key='${key}'`);
         return;
       } catch (err: any) {
+        console.log(`[S3CollectionIndex] persistEntry: Error persisting entry for key='${key}':`, err);
         if (err.$metadata && err.$metadata.httpStatusCode === 412) {
           // ETag mismatch, refetch and retry
           const fresh = await this.fetch(key);
-          // Merge all unique IDs from both the old entry and the fresh one
           entry.ids = new Set([...entry.ids, ...fresh.ids]);
           entry.etag = fresh.etag;
           entry.dirty = true;
-          // Use the fresh entry for the next persist attempt
-          // (entry reference is updated in-place)
           tryCount++;
           continue;
         }
@@ -88,6 +88,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * Enqueue an index entry for persistence. If the queue was empty, trigger the background process.
    */
   async persist(key: string, entry: IndexEntry): Promise<void> {
+    console.log(`[S3CollectionIndex] persist: Queuing persist for key='${key}', entry.ids=[${[...entry.ids].join(',')}]`);
     this.indexMap.set(key, entry);
     const wasEmpty = this.persistQueue.size === 0;
     this.persistQueue.add(key);
@@ -97,22 +98,19 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   }
 
   private _triggerPersist() {
-    // If we're behind by more than 1 minute, try to start more tasks up to maxTasks
-    const avg = this.persistDurationAvg || 0;
-    const pending = this.persistQueue.size;
-    const est = pending * avg / (this.maxTasks || 1);
-    let desiredTasks = this.runningTasks;
-    if (est > 60000) {
-      desiredTasks = this.maxTasks;
-    }
-    while (this.runningTasks < desiredTasks && this.runningTasks < this.maxTasks && this.persistQueue.size > 0) {
+    console.log(`[S3CollectionIndex] _triggerPersist: runningTasks=${this.runningTasks}, persistQueue.size=${this.persistQueue.size}`);
+    // Always try to start up to maxTasks if there is work
+    const desiredTasks = this.maxTasks;
+    while (this.runningTasks < desiredTasks && this.persistQueue.size > 0) {
       const key = this.persistQueue.values().next().value as string;
       if (typeof key !== 'string') continue;
       const deleted = this.persistQueue.delete(key);
       if (!deleted) continue; // Already being processed by another task
       this.runningTasks++;
+      console.log(`[S3CollectionIndex] _triggerPersist: starting persist for key='${key}' (runningTasks=${this.runningTasks})`);
       this._backgroundPersistTask(key).finally(() => {
         this.runningTasks--;
+        console.log(`[S3CollectionIndex] _triggerPersist: finished persist for key='${key}' (runningTasks=${this.runningTasks})`);
         if (this.persistQueue.size > 0) {
           this._triggerPersist();
         }
@@ -151,5 +149,34 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       avgPersistMs: Math.round(avg),
       estTimeToClearMs: Math.round(est),
     };
+  }
+
+  async addDocument(doc: Record<string, any>): Promise<void> {
+    console.log(`[S3CollectionIndex] addDocument: Adding doc with _id=${doc._id}`);
+    const key = this.makeIndexKey(doc);
+    let entry = this.indexMap.get(key);
+    if (!entry) {
+      entry = await this.fetch(key);
+      this.indexMap.set(key, entry);
+      console.log(`[S3CollectionIndex] addDocument: Created new index entry for key='${key}'`);
+    }
+    if (entry.add(doc._id)) {
+      console.log(`[S3CollectionIndex] addDocument: Index entry for key='${key}' marked dirty, persisting...`);
+      await this.persist(key, entry);
+    } else {
+      console.log(`[S3CollectionIndex] addDocument: Index entry for key='${key}' already contains _id=${doc._id}`);
+    }
+  }
+
+  /**
+   * Wait until all pending persist tasks are complete.
+   */
+  async flush(): Promise<void> {
+    // Guarantee the persist queue is triggered at least once
+    this._triggerPersist();
+    while (this.persistQueue.size > 0 || this.runningTasks > 0) {
+      await new Promise(res => setTimeout(res, 5));
+      this._triggerPersist(); // keep triggering in case async tasks are missed
+    }
   }
 }

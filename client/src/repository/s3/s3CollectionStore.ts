@@ -122,8 +122,19 @@ export class S3CollectionStore implements CollectionStore {
     return results;
   }
 
+  /**
+   * Helper to build an index by adding all current documents to it.
+   */
+  private async buildIndex(index: { addDocument: (doc: Record<string, any>) => Promise<void> }) {
+    const allDocs = await this.find({});
+    for (const doc of allDocs) {
+      await index.addDocument(doc);
+    }
+  }
+
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
     if (this.closed) throw new Error('Store is closed');
+    // 1. Create and persist the index metadata file
     const index = { name, keys };
     await this.s3.send(new PutObjectCommand({
       Bucket: this.bucket,
@@ -131,7 +142,17 @@ export class S3CollectionStore implements CollectionStore {
       Body: JSON.stringify(index),
       ContentType: 'application/json',
     }));
-    return index;
+    // 2. Build the index by finding all records and adding them
+    const s3Index = new S3CollectionIndex(name, keys, {
+      s3: this.s3,
+      collectionName: this.collection,
+      bucket: this.bucket,
+    });
+    await this.buildIndex(s3Index);
+    // Expose last created index instance for test synchronization
+    (this as any).lastIndexInstance = s3Index;
+    // Do not manually persist all index entries here
+    return s3Index;
   }
 
   async close() {
