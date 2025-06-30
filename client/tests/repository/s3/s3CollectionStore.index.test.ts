@@ -1,4 +1,5 @@
 import { S3CollectionStore } from '../../../src/repository/s3/s3CollectionStore';
+import { normalizeIndexKeys } from '../../../src/repository/collectionIndex';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
@@ -16,7 +17,7 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
 
   it('creates an index file with normalized keys (string)', async () => {
     const keys = 'foo';
-    const normalized = (store as any).normalizeIndexKeys(keys);
+    const normalized = normalizeIndexKeys(keys);
     const index = await store.createIndex('fooIndex', normalized);
     const call = sendMock.mock.calls[0][0];
     expect(call.constructor.name).toBe('PutObjectCommand');
@@ -30,8 +31,8 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
   });
 
   it('creates an index file with normalized keys (object)', async () => {
-    const keys = { bar: -1, baz: 'text' };
-    const normalized = (store as any).normalizeIndexKeys(keys);
+    const keys: { [key: string]: import('../../../src/repository/collectionIndex').Order } = { bar: -1, baz: 'text' };
+    const normalized = normalizeIndexKeys(keys);
     const index = await store.createIndex('barBazIndex', normalized);
     expect(index.keys).toEqual([
       { field: 'bar', order: -1 },
@@ -50,8 +51,8 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
   });
 
   it('normalizes array of keys', () => {
-    const keys = ['foo', { bar: -1 }];
-    const normalized = (store as any).normalizeIndexKeys(keys);
+    const keys: (string | { [key: string]: import('../../../src/repository/collectionIndex').Order })[] = ['foo', { bar: -1 }];
+    const normalized = normalizeIndexKeys(keys);
     expect(normalized).toEqual([
       { field: 'foo', order: 1 },
       { field: 'bar', order: -1 },
