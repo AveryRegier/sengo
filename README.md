@@ -37,6 +37,24 @@ Sengo is designed for small, cost-sensitive applications that use AWS S3 for doc
 
    This will launch the shell in the `shell` package.
 
+## Running the Sengo Shell CLI
+
+After installing dependencies, you can launch the interactive Sengo shell directly using:
+
+```sh
+npx sengo
+```
+
+Or, if installed globally:
+
+```sh
+sengo
+```
+
+This will start the shell and allow you to connect to a memory or S3-backed repository, run commands, and interact with your data.
+
+For more details, see [shell/README.md](shell/README.md).
+
 ## Usage
 
 - To use the shell interactively:

@@ -82,6 +82,22 @@ Example output:
 ]
 ```
 
+## Running the Shell CLI
+
+You can launch the interactive shell directly with:
+
+```sh
+npx sengo
+```
+
+Or, if installed globally:
+
+```sh
+sengo
+```
+
+This will start the shell and allow you to connect to a memory or S3-backed repository, run commands, and interact with your data.
+
 ---
 
 For more details, see the main README or the client package documentation.
