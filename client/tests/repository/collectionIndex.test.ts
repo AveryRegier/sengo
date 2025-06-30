@@ -1,3 +1,4 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SengoClient } from '../../src/client/client';
 import Chance from 'chance';
 import { SengoCollection } from '../../src/client/collection';

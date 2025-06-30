@@ -1,1 +1,3 @@
 src/**/*.js
+src/**/*.test.ts
+tests/types

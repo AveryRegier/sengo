@@ -4,6 +4,10 @@ dist
 client-dist
 build-cjs
 src/**/*.js
+src/**/*.test.ts
+src/testutils
+src/*.test.ts
+src/index.test.ts
 
 # Logs
 logs
