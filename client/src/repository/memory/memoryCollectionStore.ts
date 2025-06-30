@@ -1,5 +1,11 @@
 import type { CollectionStore } from '../index';
 import { ObjectId } from 'bson';
+import type { CollectionIndex } from '../collectionIndex';
+import { BaseCollectionIndex } from '../collectionIndex';
+
+export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
+  // In-memory index implementation
+}
 
 export class MemoryCollectionStore implements CollectionStore {
   private documents: Record<string, any>[] = [];
@@ -51,5 +57,10 @@ export class MemoryCollectionStore implements CollectionStore {
 
   isClosed() {
     return this.closed;
+  }
+
+  async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
+    // For demo, just return a new MemoryCollectionIndex
+    return new MemoryCollectionIndex(name, keys);
   }
 }

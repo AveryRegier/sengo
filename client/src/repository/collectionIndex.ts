@@ -1,8 +1,4 @@
-
-export type Order = 1 | -1 | 'text';
-export type IndexKeyRecord = Record<string, Order>;
-export type IndexDefinition = string | IndexKeyRecord;
-export type NormalizedIndexKeyRecord = { field: string, order: Order };
+import { IndexDefinition, IndexKeyRecord, NormalizedIndexKeyRecord, Order } from ".";
 
 export interface CollectionIndex {
   name: string;
@@ -35,7 +31,7 @@ export class IndexEntry {
   }
 }
 
-export abstract class CollectionIndex {
+export abstract class BaseCollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
   protected indexMap: Map<string, IndexEntry> = new Map();

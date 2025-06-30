@@ -1,12 +1,12 @@
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
-import { CollectionIndex, IndexEntry } from '../collectionIndex';
-import { NormalizedIndexKeyRecord } from '../';
+import type { CollectionIndex } from '../collectionIndex';
+import { BaseCollectionIndex, IndexEntry } from '../collectionIndex';
 
 /**
  * S3-backed CollectionIndex that persists index entries per key to S3.
  */
-export class S3CollectionIndex extends CollectionIndex {
+export class S3CollectionIndex extends BaseCollectionIndex {
   private s3: S3Client;
   private collectionName: string;
   private bucket: string;
@@ -17,7 +17,7 @@ export class S3CollectionIndex extends CollectionIndex {
   private persistDurationAvg: number = 0;
   private persistDurationWindow: number = 20; // moving average window
 
-  constructor(name: string, keys: NormalizedIndexKeyRecord[], opts: { s3: S3Client, collectionName: string, bucket: string }) {
+  constructor(name: string, keys: { field: string, order: 1 | -1 | 'text' }[], opts: { s3: S3Client, collectionName: string, bucket: string }) {
     super(name, keys);
     this.s3 = opts.s3;
     this.collectionName = opts.collectionName;

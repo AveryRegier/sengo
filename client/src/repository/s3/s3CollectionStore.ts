@@ -1,5 +1,6 @@
 import type { CollectionIndex } from '../collectionIndex';
-import type { CollectionStore, NormalizedIndexKeyRecord } from '../';
+import { S3CollectionIndex } from './s3CollectionIndex';
+import type { CollectionStore } from '../';
 import {
   S3Client,
   PutObjectCommand,
@@ -121,20 +122,16 @@ export class S3CollectionStore implements CollectionStore {
     return results;
   }
 
-  async createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex> {
+  async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
     if (this.closed) throw new Error('Store is closed');
-    // Use a plain object for legacy index file, not the CollectionIndex class
     const index = { name, keys };
-    const key = `${this.collection}/indices/${name}.json`;
-    const body = JSON.stringify(index);
     await this.s3.send(new PutObjectCommand({
       Bucket: this.bucket,
-      Key: key,
-      Body: body,
+      Key: `${this.collection}/indices/${name}.json`,
+      Body: JSON.stringify(index),
       ContentType: 'application/json',
     }));
-    // Return the plain object, not typed as CollectionIndex
-    return index as any;
+    return index;
   }
 
   async close() {
