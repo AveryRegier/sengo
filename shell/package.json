@@ -4,6 +4,9 @@
   "description": "Interactive shell for the Sengo MongoDB-like client.",
   "type": "module",
   "main": "dist/index.js",
+  "bin": {
+    "sengo": "bin/sengo.js"
+  },
   "scripts": {
     "start": "cd ../client && npm run build:esm:fix && cd ../shell && node ./dist/index.js",
     "build": "tsc",

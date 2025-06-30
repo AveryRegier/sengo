@@ -18,5 +18,8 @@
   },
   "devDependencies": {
     "aws-sdk-client-mock": "^4.1.0"
+  },
+  "bin": {
+    "sengo": "shell/bin/sengo.js"
   }
 }
