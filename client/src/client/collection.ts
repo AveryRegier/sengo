@@ -49,4 +49,10 @@ export class SengoCollection {
     await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
   }
+
+  async createIndex(keys: Record<string, 1 | -1 | 'text'>): Promise<string> {
+    // Simulate MongoDB's createIndex: return a string index name
+    const fields = Object.keys(keys).map(k => `${k}_${keys[k]}`).join('_');
+    return Promise.resolve(fields || 'default_index');
+  }
 }
