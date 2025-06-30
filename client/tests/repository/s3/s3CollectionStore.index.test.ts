@@ -1,6 +1,6 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { S3CollectionStore } from '../../../src/repository/s3/s3CollectionStore';
 import { normalizeIndexKeys } from '../../../src/repository/collectionIndex';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
 
 describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
   const bucket = 'test-bucket';

@@ -1,3 +1,4 @@
+import { describe, it, expect } from 'vitest';
 import { SengoClient } from '../src/client/client';
 import Chance from 'chance';
 
