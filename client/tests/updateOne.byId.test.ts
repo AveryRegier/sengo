@@ -3,7 +3,7 @@ import { SengoClient } from '../src/client/client';
 import Chance from 'chance';
 import { S3BucketSimulator } from './repository/s3/S3BucketSimulator';
 import { mockClient } from 'aws-sdk-client-mock';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 
 const chance = new Chance();
 
@@ -36,6 +36,10 @@ describe('SengoClient updateOne API (s3 backend)', () => {
     // Mock GetObjectCommand
     s3Mock.on(GetObjectCommand).callsFake((input) => {
       return bucketSim.getObject(input.Key);
+    });
+    // Mock ListObjectsV2Command
+    s3Mock.on(ListObjectsV2Command).callsFake((input) => {
+      return bucketSim.listObjectsV2(input.Prefix);
     });
   });
   it('should update a document by _id', async () => {

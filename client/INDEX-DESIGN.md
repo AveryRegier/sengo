@@ -16,6 +16,24 @@ Sango is designed for small, cost-sensitive applications that use AWS S3 for doc
 - Text indexes may use string keys; details to be explored.
 - Indexes are stored in a dedicated S3 prefix (e.g., `collection/indices/`).
 
+## S3 Index File Structure
+- Each index entry is stored as a separate S3 object:
+  - Path: `collection/indices/indexName/key.json`
+  - Contents: JSON array of document IDs for that key
+  - ETag is used for optimistic concurrency control
+
+## Index Entry Cache
+- In-memory cache per process for index entries
+- Cleared on process restart; S3 is always the source of truth
+- Cache is not shared between tests or processes
+
+## Testability
+- All S3 accesses (read, write, delete) are logged in tests
+- S3 simulation (`S3BucketSimulator`) is used for all S3 operations in tests
+- Each test sets up its own S3 state and simulator instance
+- Helpers are provided to set up index entries and document files in S3
+- No S3 state or logs are shared between tests
+
 ## Performance and Use Case
 - Designed for apps with infrequent use (e.g., volunteer orgs, occasional data entry).
 - Split-second response is not required, but user experience must remain natural.
