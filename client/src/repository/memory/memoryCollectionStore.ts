@@ -1,10 +1,44 @@
+  async findIdsForKey(key: string): Promise<string[]> {
+    const entry = await this.getIndexEntryForKey(key);
+    console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
+    return entry.toArray();
+  }
+
 import type { CollectionStore } from '../index';
 import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
-
 export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
-  // In-memory index implementation
+  async removeDocument(doc: Record<string, any>): Promise<void> {
+    if (!doc._id) throw new Error('Document must have an _id');
+    const key = this.makeIndexKey(doc);
+    let entry = this.indexMap.get(key);
+    if (!entry) {
+      entry = await this.fetch(key);
+      this.indexMap.set(key, entry);
+    }
+    if (entry.ids.has(doc._id)) {
+      entry.ids.delete(doc._id);
+      entry.dirty = true;
+    }
+  }
+
+  async findIdsForKey(key: string): Promise<string[]> {
+    let entry = this.indexMap.get(key);
+    if (!entry) {
+      entry = await this.fetch(key);
+      this.indexMap.set(key, entry);
+    }
+    console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
+    return entry.toArray();
+  }
+  }
+
+  async findIdsForKey(key: string): Promise<string[]> {
+    const entry = await this.getIndexEntryForKey(key);
+    console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
+    return entry.toArray();
+  }
 }
 
 export class MemoryCollectionStore implements CollectionStore {

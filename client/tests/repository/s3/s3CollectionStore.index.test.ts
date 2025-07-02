@@ -366,8 +366,13 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
     expect(indexLog4.length).toBeGreaterThanOrEqual(0);
   });
 
-  /*
+
   it('removes document ID from old index entry and adds to new one when indexed field changes on update', async () => {
+    // Setup
+    const s3sim = new S3BucketSimulator();
+    (s3sim as any)._debugHash = shortHash();
+    const { store, sendMock } = makeStoreWithSim(s3sim);
+    const sengoCollection = new SengoCollection(collection, store);
     // Insert a doc with foo: 1 as 1
     await sengoCollection.insertOne({ _id: 'doc1', foo: 1 as 1 });
     const keys = { foo: 1 as 1 };
@@ -382,14 +387,13 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
       await index.flush();
     }
     // Check S3 state: old index entry (foo:1) should NOT contain doc1, new entry (foo:2) should
-    const oldIndexKey = `${collection}/indices/${indexName}/${makeIndexKey({ foo: 1 })}.json`;
-    const newIndexKey = `${collection}/indices/${indexName}/${makeIndexKey({ foo: 2 })}.json`;
-    const oldEntry = s3sim.getObject(oldIndexKey);
-    const newEntry = s3sim.getObject(newIndexKey);
-    const oldIds = oldEntry ? JSON.parse(await streamToString(oldEntry.Body)) : [];
-    const newIds = newEntry ? JSON.parse(await streamToString(newEntry.Body)) : [];
+    const oldIndexKey = `${collection}/indices/${indexName}/1.json`;
+    const newIndexKey = `${collection}/indices/${indexName}/2.json`;
+    const oldEntry = s3sim.getFile(oldIndexKey);
+    const newEntry = s3sim.getFile(newIndexKey);
+    const oldIds = oldEntry ? JSON.parse(oldEntry) : [];
+    const newIds = newEntry ? JSON.parse(newEntry) : [];
     expect(oldIds).not.toContain('doc1');
     expect(newIds).toContain('doc1');
   });
-  */
 });

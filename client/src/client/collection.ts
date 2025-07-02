@@ -26,11 +26,13 @@ export class SengoCollection {
       throw new Error('Store is closed');
     }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
+    console.log('[SengoCollection.insertOne] Inserting:', JSON.stringify(docWithId));
     await this.store.replaceOne({ _id: docWithId._id }, docWithId);
     // Index maintenance: update all indexes
     for (const indexName in this._indexes) {
       const index = this._indexes[indexName];
       if (typeof index.addDocument === 'function') {
+        console.log(`[SengoCollection.insertOne] Adding doc to index '${indexName}':`, JSON.stringify(docWithId));
         await index.addDocument(docWithId);
         if (typeof index.flush === 'function') {
           await index.flush();
@@ -41,7 +43,9 @@ export class SengoCollection {
   }
 
   async find(query: Record<string, any>) {
-    return this.store.find(query);
+    const result = this.store.find(query);
+    console.log('[SengoCollection.find] Query:', JSON.stringify(query), 'Result:', JSON.stringify(result));
+    return result;
   }
 
   async updateOne(filter: Record<string, any>, update: Record<string, any>) {
@@ -66,10 +70,20 @@ export class SengoCollection {
     }
     // Save the updated doc
     await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
-    // Index maintenance: update all indexes
+
+    // Index maintenance: update all indexes (remove from old key, add to new key if indexed fields changed)
     for (const indexName in this._indexes) {
       const index = this._indexes[indexName];
-      if (typeof index.addDocument === 'function') {
+      if (typeof index.addDocument === 'function' && typeof index.makeIndexKey === 'function') {
+        // Compute old and new index keys
+        const oldKey = index.makeIndexKey(doc);
+        const newKey = index.makeIndexKey(updatedDoc);
+        if (oldKey !== newKey && typeof index.removeDocument === 'function') {
+          console.log(`[SengoCollection.updateOne] Removing doc from old index key '${oldKey}' in index '${indexName}':`, JSON.stringify(doc));
+          await index.removeDocument(doc);
+        }
+        // Always add to new key (covers both changed and unchanged)
+        console.log(`[SengoCollection.updateOne] Adding doc to new index key '${newKey}' in index '${indexName}':`, JSON.stringify(updatedDoc));
         await index.addDocument(updatedDoc);
         if (typeof index.flush === 'function') {
           await index.flush();

@@ -1,3 +1,4 @@
+// Move this test inside the describe block below so it has access to `store`
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MemoryCollectionStore } from '../../../src/repository/memory/memoryCollectionStore';
 
@@ -39,5 +40,30 @@ describe('MemoryCollectionStore', () => {
     await store.dropIndex('bar_1');
     // Should be gone
     expect(store.getIndex('bar_1')).toBeUndefined();
+  });
+
+  it('removes document ID from old index entry and adds to new one when indexed field changes on update', async () => {
+    // Insert a doc with foo: 1
+    await store.replaceOne({ _id: 'doc1' }, { _id: 'doc1', foo: 1 });
+    await store.createIndex('foo_1', [{ field: 'foo', order: 1 }]);
+    let index = store.getIndex('foo_1');
+    if (index && typeof index.addDocument === 'function') {
+      await index.addDocument({ _id: 'doc1', foo: 1 });
+    }
+    // Update the doc, changing foo from 1 to 2
+    await store.replaceOne({ _id: 'doc1' }, { _id: 'doc1', foo: 2 });
+    // Simulate index maintenance: remove from old, add to new
+    if (index && typeof index.removeDocument === 'function') {
+      await index.removeDocument({ _id: 'doc1', foo: 1 });
+    }
+    if (index && typeof index.addDocument === 'function') {
+      await index.addDocument({ _id: 'doc1', foo: 2 });
+    }
+    // Check index state
+    const map = index && typeof index.getIndexMap === 'function' ? index.getIndexMap() : {};
+    // Old key should not contain doc1
+    expect(map['1'] || []).not.toContain('doc1');
+    // New key should contain doc1
+    expect(map['2'] || []).toContain('doc1');
   });
 });

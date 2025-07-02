@@ -20,5 +20,5 @@
     - Ensure test assertions match actual S3 access patterns
 
 ## Other
-- [ ] Add tests for index entry removal on update (when indexed fields change)
+- [x] Add tests for index entry removal on update (when indexed fields change)
 - [ ] Document index maintenance and test isolation in README and design docs
