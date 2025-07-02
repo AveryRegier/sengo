@@ -1,16 +1,4 @@
-  async findIdsForKey(key: string): Promise<string[]> {
-    let entry = this.indexMap.get(key);
-    if (!entry) {
-      entry = await this.fetch(key);
-      this.indexMap.set(key, entry);
-    }
-    // Debug log for index search
-    // @ts-ignore: Only subclasses may want to log
-    if (typeof this.name === 'string' && this.name.includes('Memory')) {
-      console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
-    }
-    return entry.toArray();
-  }
+// Removed erroneous global async function definition. findIdsForKey should only be defined in subclasses.
 import { IndexDefinition, IndexKeyRecord, NormalizedIndexKeyRecord, Order } from ".";
 
 export interface CollectionIndex {

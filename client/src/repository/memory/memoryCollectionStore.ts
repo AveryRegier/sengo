@@ -1,8 +1,4 @@
-  async findIdsForKey(key: string): Promise<string[]> {
-    const entry = await this.getIndexEntryForKey(key);
-    console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
-    return entry.toArray();
-  }
+
 
 import type { CollectionStore } from '../index';
 import { ObjectId } from 'bson';
@@ -29,13 +25,6 @@ export class MemoryCollectionIndex extends BaseCollectionIndex implements Collec
       entry = await this.fetch(key);
       this.indexMap.set(key, entry);
     }
-    console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
-    return entry.toArray();
-  }
-  }
-
-  async findIdsForKey(key: string): Promise<string[]> {
-    const entry = await this.getIndexEntryForKey(key);
     console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
     return entry.toArray();
   }
