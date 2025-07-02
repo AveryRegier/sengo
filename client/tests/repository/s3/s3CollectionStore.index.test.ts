@@ -33,6 +33,52 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
   const bucket = 'test-bucket-'+chance.word();
   const collection = 'test-collection'+chance.word();
 
+  it('dropIndex deletes all index files and disables index usage', async () => {
+    const s3sim = new S3BucketSimulator();
+    (s3sim as any)._debugHash = shortHash();
+    const { store, sendMock } = makeStoreWithSim(s3sim);
+    const sengoCollection = new SengoCollection(collection, store);
+    // Insert docs and create index
+    await sengoCollection.insertOne({ _id: 'a', foo: 1 as 1 });
+    await sengoCollection.insertOne({ _id: 'b', foo: 2 as 1 });
+    const keys = { foo: 1 as 1 };
+    const indexName = await sengoCollection.createIndex(keys);
+    const index = (store as any).lastIndexInstance;
+    if (index && typeof index.flush === 'function') {
+      await index.flush();
+    }
+    // Confirm index files exist
+    const metaKey = `${collection}/indices/${indexName}.json`;
+    const entryKeyA = `${collection}/indices/${indexName}/1.json`;
+    const entryKeyB = `${collection}/indices/${indexName}/2.json`;
+    expect(s3sim.getFile(metaKey)).toBeDefined();
+    expect(s3sim.getFile(entryKeyA)).toBeDefined();
+    expect(s3sim.getFile(entryKeyB)).toBeDefined();
+
+    // Drop the index
+    await sengoCollection.dropIndex(indexName);
+
+    // All index files should be deleted
+    expect(s3sim.getFile(metaKey)).toBeUndefined();
+    expect(s3sim.getFile(entryKeyA)).toBeUndefined();
+    expect(s3sim.getFile(entryKeyB)).toBeUndefined();
+
+    // The index should not be used for queries anymore (should fallback to collection scan)
+    // Insert a new doc to ensure collection scan works
+    await sengoCollection.insertOne({ _id: 'c', foo: 1 as 1 });
+    // Should still find docs with foo: 1, but not via index (simulate by clearing logs)
+    s3sim.clearAccessLog();
+    const found = await sengoCollection.find({ foo: 1 });
+    // Should find both 'a' and 'c' (since index is gone, fallback to scan)
+    const foundIds = found.map((d: any) => d._id).sort();
+    expect(foundIds).toEqual(expect.arrayContaining(['a', 'c']));
+    // Should not have loaded any index entry files (no /indices/{indexName}/... in access log)
+    const accessLog = s3sim.getAccessLog();
+    expect(accessLog.some(k => k.startsWith(`${collection}/indices/${indexName}/`))).toBe(false);
+    // Should not have loaded the index metadata file
+    expect(accessLog.includes(metaKey)).toBe(false);
+  });
+
   // Refactored: create a single simulator per test, but allow multiple stores/log containers
   function makeStoreWithSim(s3sim: S3BucketSimulator) {
     const sendMock = vi.fn(async (cmd: any) => {
@@ -49,6 +95,10 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
       }
       if (cmd instanceof ListObjectsV2Command) {
         return s3sim.listObjectsV2(cmd.input.Prefix);
+      }
+      // Add DeleteObjectCommand support
+      if (cmd.constructor && cmd.constructor.name === 'DeleteObjectCommand') {
+        return s3sim.deleteObject(cmd.input.Key!);
       }
       throw new Error('Unknown command: ' + cmd.constructor.name);
     });

@@ -60,7 +60,10 @@ export abstract class BaseCollectionIndex {
   }
 
   protected makeIndexKey(doc: Record<string, any>): string {
-    return this.keys.map(k => `${k.field}:${doc[k.field] ?? ''}:${k.order}`).join('|');
+    // Only use the field values, not the order or field name, for the key
+    // For a single key: { foo: 1 } => '1'
+    // For multiple keys: { foo: 1, bar: -1 } => '1|-1'
+    return this.keys.map(k => `${doc[k.field] ?? ''}`).join('|');
   }
 
   getIndexMap(): Record<string, string[]> {

@@ -11,6 +11,7 @@ export interface CollectionStore {
   replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void>;
   find(query: Record<string, any>): Promise<Record<string, any>[]> | Record<string, any>[];
   createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex>;
+  dropIndex(name: string): Promise<void>;
 }
 
 export interface DbStore {

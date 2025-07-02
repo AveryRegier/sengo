@@ -9,7 +9,7 @@ import { MongoNetworkError } from './s3CollectionStore';
  *
  * ## S3 Index File Structure
  * - Each index entry is stored as a separate S3 object:
- *   - Path: `collection/indices/indexName/key.json`
+ *   - Path: `collection/indices/indexName/key.json` (where key is the encoded value(s) of the indexed field(s))
  *   - Contents: JSON array of document IDs for that key
  *   - ETag is used for optimistic concurrency control
  *
@@ -58,7 +58,9 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param key Index key
    */
   protected async fetch(key: string): Promise<IndexEntry> {
-    const s3Key = `${this.collectionName}/indices/${this.name}/${encodeURIComponent(key)}.json`;
+    // key is now just the value(s) of the indexed field(s), already encoded by makeIndexKey
+    // Do NOT re-encode here; just use as-is to match file naming in tests and production
+    const s3Key = `${this.collectionName}/indices/${this.name}/${key}.json`;
     try {
       const result = await this.s3.send(new GetObjectCommand({
         Bucket: this.bucket,
@@ -87,8 +89,10 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param entry IndexEntry to persist
    */
   protected async persistEntry(key: string, entry: IndexEntry): Promise<void> {
-    console.log(`[S3CollectionIndex] persistEntry: Persisting entry for key='${key}', ids=[${[...entry.ids].join(',')}]`);
-    const s3Key = `${this.collectionName}/indices/${this.name}/${encodeURIComponent(key)}.json`;
+    // key is now just the value(s) of the indexed field(s), not including order
+    // Encode each value, not the separator, to match test and MongoDB compatibility
+    const encodedKey = key.split('|').map(v => encodeURIComponent(v)).join('|');
+    const s3Key = `${this.collectionName}/indices/${this.name}/${encodedKey}.json`;
     let tryCount = 0;
     while (tryCount < 3) {
       try {

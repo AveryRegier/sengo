@@ -5,10 +5,19 @@ export class SengoCollection {
   name: string;
   store: CollectionStore;
   static collections: Record<string, SengoCollection> = {};
+  private _indexes: Record<string, any> = {};
 
   constructor(name: string, store: CollectionStore) {
     this.name = name;
     this.store = store;
+  }
+
+  /**
+   * Drop an index by name (MongoDB compatible: dropIndex)
+   */
+  async dropIndex(name: string): Promise<void> {
+    await this.store.dropIndex(name);
+    delete this._indexes[name];
   }
 
   async insertOne(doc: Record<string, any>) {
@@ -18,6 +27,16 @@ export class SengoCollection {
     }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
     await this.store.replaceOne({ _id: docWithId._id }, docWithId);
+    // Index maintenance: update all indexes
+    for (const indexName in this._indexes) {
+      const index = this._indexes[indexName];
+      if (typeof index.addDocument === 'function') {
+        await index.addDocument(docWithId);
+        if (typeof index.flush === 'function') {
+          await index.flush();
+        }
+      }
+    }
     return { acknowledged: true, insertedId: docWithId._id };
   }
 
@@ -47,6 +66,16 @@ export class SengoCollection {
     }
     // Save the updated doc
     await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
+    // Index maintenance: update all indexes
+    for (const indexName in this._indexes) {
+      const index = this._indexes[indexName];
+      if (typeof index.addDocument === 'function') {
+        await index.addDocument(updatedDoc);
+        if (typeof index.flush === 'function') {
+          await index.flush();
+        }
+      }
+    }
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
   }
 
@@ -70,6 +99,8 @@ export class SengoCollection {
         await (index as any).addDocument(doc);
       }
     }
+    // Track the index for future maintenance
+    this._indexes[fields || 'default_index'] = index;
     return fields || 'default_index';
   }
 }

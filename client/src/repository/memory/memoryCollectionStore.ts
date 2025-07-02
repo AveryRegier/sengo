@@ -11,6 +11,7 @@ export class MemoryCollectionStore implements CollectionStore {
   private documents: Record<string, any>[] = [];
   name: string;
   private closed = false;
+  private indexes: Map<string, MemoryCollectionIndex> = new Map();
   constructor(name?: string) {
     this.name = name || '';
   }
@@ -59,6 +60,7 @@ export class MemoryCollectionStore implements CollectionStore {
     return this.closed;
   }
 
+
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
     this.checkClosure();
     const index = new MemoryCollectionIndex(name, keys);
@@ -66,6 +68,19 @@ export class MemoryCollectionStore implements CollectionStore {
     for (const doc of this.documents) {
       await index.addDocument(doc);
     }
+    this.indexes.set(name, index);
     return index;
+  }
+
+  /**
+   * Get an index by name (for testing only)
+   */
+  getIndex(name: string): MemoryCollectionIndex | undefined {
+    return this.indexes.get(name);
+  }
+
+  async dropIndex(name: string): Promise<void> {
+    this.checkClosure();
+    this.indexes.delete(name);
   }
 }

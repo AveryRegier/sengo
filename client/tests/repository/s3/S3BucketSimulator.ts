@@ -1,9 +1,25 @@
 import { Readable } from 'stream';
 
 export class S3BucketSimulator {
+  /** Short hash for debug output, unique per instance */
+  /** Short hash for debug output, unique per instance (can be set externally for test determinism) */
+  public _debugHash: string;
   private files: Record<string, string> = {};
   private accessLog: string[] = [];
+  private indexAccessLog: string[] = [];
+  private documentAccessLog: string[] = [];
   private getObjectCallCount: Record<string, number> = {};
+
+  constructor() {
+    // Allow external override for deterministic test output
+    this._debugHash = Math.random().toString(36).slice(2, 8);
+  }
+  /**
+   * Dump the current S3 state for debug (returns a shallow copy of the bucket)
+   */
+  dump() {
+    return { ...this.files };
+  }
 
   // --- Command normalization helpers ---
   static extractKey(cmd: any): string | undefined {
@@ -94,19 +110,27 @@ export class S3BucketSimulator {
     if (!key) throw new Error('putObject: missing key');
     if (b === undefined) throw new Error('putObject: missing body');
     this.files[key] = b;
-    // Log all index file writes
+    // Log all index/document file writes
     if (key.includes('/indices/')) {
-      this.accessLog.push(key);
+      this.indexAccessLog.push(key);
+    } else if (key.includes('/documents/')) {
+      this.documentAccessLog.push(key);
     }
+    // For backward compatibility
+    this.accessLog.push(key);
   }
 
   getObject(keyOrCmd: string | any) {
     const key = typeof keyOrCmd === 'string' ? keyOrCmd : S3BucketSimulator.extractKey(keyOrCmd);
     if (!key) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
-    // Log all index file reads
+    // Log all index/document file reads
     if (key.includes('/indices/')) {
-      this.accessLog.push(key);
+      this.indexAccessLog.push(key);
+    } else if (key.includes('/documents/')) {
+      this.documentAccessLog.push(key);
     }
+    // For backward compatibility
+    this.accessLog.push(key);
     this.getObjectCallCount[key] = (this.getObjectCallCount[key] || 0) + 1;
     if (!(key in this.files)) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
     return {
@@ -117,10 +141,14 @@ export class S3BucketSimulator {
   deleteObject(keyOrCmd: string | any) {
     const key = typeof keyOrCmd === 'string' ? keyOrCmd : S3BucketSimulator.extractKey(keyOrCmd);
     if (!key) return { DeleteMarker: false };
-    // Log all index file deletes
+    // Log all index/document file deletes
     if (key.includes('/indices/')) {
-      this.accessLog.push(key);
+      this.indexAccessLog.push(key);
+    } else if (key.includes('/documents/')) {
+      this.documentAccessLog.push(key);
     }
+    // For backward compatibility
+    this.accessLog.push(key);
     const existed = key in this.files;
     delete this.files[key];
     return { DeleteMarker: existed };
@@ -129,15 +157,27 @@ export class S3BucketSimulator {
   clear() {
     this.files = {};
     this.accessLog = [];
+    this.indexAccessLog = [];
+    this.documentAccessLog = [];
     this.getObjectCallCount = {};
   }
 
   clearAccessLog() {
     this.accessLog = [];
+    this.indexAccessLog = [];
+    this.documentAccessLog = [];
   }
 
   getAccessLog() {
     return [...this.accessLog];
+  }
+
+  getIndexAccessLog() {
+    return [...this.indexAccessLog];
+  }
+
+  getDocumentAccessLog() {
+    return [...this.documentAccessLog];
   }
 
   listObjects(prefix: string = ''): string[] {

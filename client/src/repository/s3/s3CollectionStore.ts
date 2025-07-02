@@ -1,3 +1,5 @@
+
+// (stray dropIndex removed, now only in class body)
 import type { CollectionIndex } from '../collectionIndex';
 import { S3CollectionIndex } from './s3CollectionIndex';
 import type { CollectionStore } from '../';
@@ -5,7 +7,8 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
-  ListObjectsV2Command
+  ListObjectsV2Command,
+  DeleteObjectCommand
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 
@@ -33,6 +36,33 @@ export class S3CollectionStore implements CollectionStore {
       ...(opts?.region ? { region: opts.region } : {}),
       ...(opts?.credentials ? { credentials: opts.credentials } : {}),
     });
+  }
+
+  async dropIndex(name: string): Promise<void> {
+    if (this.closed) throw new Error('Store is closed');
+    await this.ensureIndexesLoaded();
+    // Delete index metadata file
+    const metaKey = `${this.collection}/indices/${name}.json`;
+    await this.s3.send(new DeleteObjectCommand({
+      Bucket: this.bucket,
+      Key: metaKey,
+    }));
+    // List and delete all entry files under the index prefix
+    const prefix = `${this.collection}/indices/${name}/`;
+    const listed = await this.s3.send(new ListObjectsV2Command({
+      Bucket: this.bucket,
+      Prefix: prefix,
+    }));
+    if (listed.Contents) {
+      for (const obj of listed.Contents) {
+        await this.s3.send(new DeleteObjectCommand({
+          Bucket: this.bucket,
+          Key: obj.Key,
+        }));
+      }
+    }
+    // Remove from loadedIndexes
+    this.loadedIndexes.delete(name);
   }
 
   isClosed() {
@@ -95,68 +125,58 @@ export class S3CollectionStore implements CollectionStore {
     // Select the best matching index (first key must match)
     const index = this.findBestIndex(query);
     if (index) {
-      // Use only the keys that are present in the query, starting from the first
-      const keyFields = [];
-      for (const k of index.keys) {
-        if (query.hasOwnProperty(k.field)) {
-          keyFields.push(k);
-        } else {
-          break;
+      // Use the index's key generation to build the correct key for the query
+      const key = (typeof (index as any).getIndexKeyForQuery === 'function')
+        ? (index as any).getIndexKeyForQuery(query)
+        : (index as any).makeIndexKey(query);
+      let ids: string[] = [];
+      try {
+        ids = await index.findIdsForKey(key);
+      } catch (err: any) {
+        if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
+          throw new MongoNetworkError(err.message || 'Network error');
         }
+        if (typeof err === 'string') {
+          throw new MongoNetworkError(err);
+        }
+        throw err;
       }
-      // If at least the first key is matched, use the index
-      if (keyFields.length > 0) {
-        // Build a partial key for the matched fields
-        const partialKey = keyFields.map(k => `${k.field}:${query[k.field] ?? ''}:${k.order}`).join('|');
-        let ids: string[] = [];
+      const docs: any[] = [];
+      for (const id of ids) {
+        const docKey = `${this.collection}/data/${id}.json`;
         try {
-          ids = await index.findIdsForKey(partialKey);
+          const result = await this.s3.send(new GetObjectCommand({
+            Bucket: this.bucket,
+            Key: docKey,
+          }));
+          if (!result || !result.Body) throw Object.assign(new Error('Not found'), { name: 'NoSuchKey' });
+          const stream = result.Body as Readable;
+          const data = await new Promise<string>((resolve, reject) => {
+            let str = '';
+            stream.on('data', chunk => (str += chunk));
+            stream.on('end', () => resolve(str));
+            stream.on('error', reject);
+          });
+          docs.push(JSON.parse(data));
         } catch (err: any) {
+          if (err.name === 'NoSuchKey') continue;
           if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
             throw new MongoNetworkError(err.message || 'Network error');
           }
+          // If the error is a string (e.g., 'connect ETIMEDOUT'), wrap it as an Error object
           if (typeof err === 'string') {
             throw new MongoNetworkError(err);
           }
+          if (err && typeof err.message === 'string' && /etimedout|network|timeout|econnrefused/i.test(err.message)) {
+            throw new MongoNetworkError(err.message || 'Network error');
+          }
+          if (err && typeof err.toString === 'function' && /etimedout|network|timeout|econnrefused/i.test(err.toString())) {
+            throw new MongoNetworkError(err.message || 'Network error');
+          }
           throw err;
         }
-        const docs: any[] = [];
-        for (const id of ids) {
-          const docKey = `${this.collection}/data/${id}.json`;
-          try {
-            const result = await this.s3.send(new GetObjectCommand({
-              Bucket: this.bucket,
-              Key: docKey,
-            }));
-            if (!result || !result.Body) throw Object.assign(new Error('Not found'), { name: 'NoSuchKey' });
-            const stream = result.Body as Readable;
-            const data = await new Promise<string>((resolve, reject) => {
-              let str = '';
-              stream.on('data', chunk => (str += chunk));
-              stream.on('end', () => resolve(str));
-              stream.on('error', reject);
-            });
-            docs.push(JSON.parse(data));
-          } catch (err: any) {
-            if (err.name === 'NoSuchKey') continue;
-            if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-              throw new MongoNetworkError(err.message || 'Network error');
-            }
-            // If the error is a string (e.g., 'connect ETIMEDOUT'), wrap it as an Error object
-            if (typeof err === 'string') {
-              throw new MongoNetworkError(err);
-            }
-            if (err && typeof err.message === 'string' && /etimedout|network|timeout|econnrefused/i.test(err.message)) {
-              throw new MongoNetworkError(err.message || 'Network error');
-            }
-            if (err && typeof err.toString === 'function' && /etimedout|network|timeout|econnrefused/i.test(err.toString())) {
-              throw new MongoNetworkError(err.message || 'Network error');
-            }
-            throw err;
-          }
-        }
-        return docs;
       }
+      return docs;
     }
     // Fallback: Only supports find by _id for now
     if (query._id) {
@@ -289,8 +309,10 @@ export class S3CollectionStore implements CollectionStore {
     if (!listed.Contents) return;
     for (const obj of listed.Contents) {
       const key = obj.Key!;
-      if (key.endsWith('.json') && !key.includes('/')) {
-        // Only load index metadata files, not entry files
+      // Only load index metadata files, not entry files
+      // Metadata files are of the form: {collection}/indices/{indexName}.json (no further slashes after /indices/)
+      const rel = key.slice((`${this.collection}/indices/`).length);
+      if (key.endsWith('.json') && !rel.includes('/')) {
         const result = await this.s3.send(new GetObjectCommand({
           Bucket: this.bucket,
           Key: key,
