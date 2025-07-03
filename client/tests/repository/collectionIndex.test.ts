@@ -120,5 +120,19 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     expect(oldIds).not.toContain(docId);
     expect(newIds).toContain(docId);
   });
+  it('deleteOne removes a document so it cannot be found', async () => {
+    const doc = { ...docCreator(), foo: 'Z' };
+    const insertResult = await collection.insertOne(doc);
+    const docId = insertResult.insertedId;
+    // Should be found before deletion
+    let found = await collection.find({ _id: docId });
+    expect(found.length).toBe(1);
+    expect(found[0]._id.toString()).toBe(docId.toString());
+    // Delete the document
+    await collection.deleteOne({ _id: docId });
+    // Should not be found after deletion
+    found = await collection.find({ _id: docId });
+    expect(found.length).toBe(0);
+  });
   // ...existing code...
 });

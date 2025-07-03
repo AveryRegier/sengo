@@ -1,6 +1,8 @@
 import { CollectionIndex, IndexDefinition, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 
+import { notImplementedMongo } from '../utils';
+
 export class SengoCollection {
   name: string;
   store: CollectionStore;
@@ -77,6 +79,13 @@ export class SengoCollection {
       }
     }
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  }
+
+  /**
+   * Delete a single document matching the filter (MongoDB compatible: deleteOne)
+   */
+  async deleteOne(filter: Record<string, any>) {
+    notImplementedMongo('deleteOne');
   }
 
   async createIndex(keys: Record<string, 1 | -1 | 'text'>): Promise<string> {
