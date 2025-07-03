@@ -3,7 +3,7 @@
 Sengo is an open source clean room implementation of a useful subset of the MongoDB client for Node.js, using AWS S3 as a backend for document storage.
 
 ## Motivation
-Sengo is designed for small, cost-sensitive applications that use AWS S3 for document storage. It is ideal for apps with infrequent use (e.g., volunteer orgs, occasional data entry) and aims for near-zero storage costs when idle. Sengo supports efficient search and retrieval via a flexible, document-based indexing system. See [doc/INDEX-DESIGN.md](./doc/INDEX-DESIGN.md) for details on the indexing feature design and future plans.
+Sengo is designed for small, cost-sensitive applications that use AWS S3 for document storage. It is ideal for apps with infrequent use (e.g., volunteer orgs, occasional data entry) and aims for near-zero storage costs when idle. Sengo supports efficient search and retrieval via a flexible, document-based indexing system. See [docs/INDEX-DESIGN.md](./docs/INDEX-DESIGN.md) for details on the indexing feature design and future plans.
 
 ## Features
 - MongoDB-like API for document operations
@@ -17,9 +17,8 @@ Sengo is designed for small, cost-sensitive applications that use AWS S3 for doc
    ```
 2. Build the project:
    ```sh
-   npx tsc
+   npx run verify
    ```
-3. Start developing your library in the `src` directory.
 
 ## Usage Example
 

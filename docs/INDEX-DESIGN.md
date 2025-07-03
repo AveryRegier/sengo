@@ -1,76 +1,92 @@
-# Sango Indexing Design (Consolidated)
+# Sengo S3 Index Design
 
-## Motivation
-Sango is designed for small, cost-sensitive applications that use AWS S3 for document storage. To enable efficient search and retrieval without incurring high costs or requiring persistent infrastructure, Sango will support a flexible, document-based indexing system.
+## Use Case and Motivation
+Sengo is designed for small, cost-sensitive applications—such as volunteer organizations or event-driven apps—that use AWS S3 for document storage. These applications require a simple, reliable way to store and retrieve documents without the cost or operational complexity of running a database server. However, as collections grow, searching by loading every document from S3 becomes impractical and expensive.
 
-## Indexing Requirements
-- **Efficient Search:** Indexes must allow fast lookup by fields (e.g., name, date) without loading all documents from S3.
-- **Low Cost:** Indexes are stored as documents in S3, minimizing storage and operational costs.
-- **Incremental Updates:** Indexes must support adding new documents and incremental updates.
-- **Re-indexing:** Full re-indexing from scratch must be possible for recovery or schema changes.
-- **Future Growth:** Index format must allow for future features (sorting, text search, filtering, etc.).
+## Technology Choices: MongoDB Compatibility and S3
+Sengo provides a MongoDB-like API for document operations, making it familiar to developers. Instead of using a database server, Sengo stores each document as a separate JSON file in S3. To support efficient queries, Sengo implements its own indexing system, inspired by MongoDB, but tailored for S3’s object storage model.
 
-## Index Document Structure
-- Each index is a document (or set of documents) mapping indexed field values to arrays of document IDs.
-- Indexes support single-field and compound keys, with ascending (1) or descending (-1) order.
-- Text indexes may use string keys; details to be explored.
-- Indexes are stored in a dedicated S3 prefix (e.g., `collection/indices/`).
+## The Need for Indexes
+Without indexes, every query would require listing and loading all documents in a collection from S3—a slow and costly operation. Indexes allow Sengo to quickly find the IDs of documents matching a query, so only the relevant documents are loaded from S3.
 
-## S3 Index File Structure
-- Each index entry is stored as a separate S3 object:
-  - Path: `collection/indices/indexName/key.json`
-  - Contents: JSON array of document IDs for that key
-  - ETag is used for optimistic concurrency control
+## S3 Index and Document File Layout
+Sengo stores both documents and index entries as individual JSON files in S3, organized by collection:
 
-## Index Entry Cache
-- In-memory cache per process for index entries
-- Cleared on process restart; S3 is always the source of truth
-- Cache is not shared between tests or processes
+### Document Storage
+- **Path:** `collection/data/<_id>.json`
+- **Contents:** The full JSON document, including its `_id` field.
 
-## S3 Simulation and Test Isolation
-- Tests use `S3BucketSimulator` to simulate S3 state and log all accesses
-- Each test creates its own simulator instance and sets up its own S3 state
-- No S3 state or logs are shared between tests
-- Helpers are provided for setting up S3 state for index entries and document files
+**Example:**
+- Path: `pets/data/64a1f2c3e4b5d6789a0b1c2d.json`
+- Contents:
+```json
+{
+  "_id": "64a1f2c3e4b5d6789a0b1c2d",
+  "name": "Milo"
+}
+```
 
-## Index Loading and Querying Design
-- **Index Definitions:** When a collection is first used, all index definitions (metadata) are loaded into memory. This allows the collection to know which indexes are available and their key structure.
-- **Index Selection:** On each `find()` operation, the collection inspects all loaded index definitions and selects the best matching index based on the query and the index’s `NormalizedIndexKeyRecord` (the set of fields and orderings the index covers).
-- **IndexEntry Loading:** The actual index entry file (mapping from key to document IDs) is loaded lazily and at most once per key, via the index instance, when a query uses that index and key. This ensures efficient S3 usage and avoids redundant loads.
-- **CollectionIndex Abstraction:** The `CollectionIndex` abstraction is responsible for both index maintenance (generation, updates) and for providing the mapping from query to document IDs during `find()`. It is designed to be extended for different backends (e.g., in-memory, S3-backed).
+### Index Metadata
+- **Path:** `collection/indices/<indexName>.json`
+- **Contents:** JSON describing the index definition (fields, order, etc).
 
-## Performance and Use Case
-- Designed for apps with infrequent use (e.g., volunteer orgs, occasional data entry).
-- Split-second response is not required, but user experience must remain natural.
-- Suitable for Lambda/event-driven architectures.
+**Example:**
+- Path: `pets/indices/name_1.json`
+- Contents:
+```json
+{
+  "name": "name_1",
+  "keys": [{ "field": "name", "order": 1 }]
+}
+```
 
-## Key Design Decisions (2025-07-01)
-- **Robust Index Maintenance:** On update, if an indexed field changes, the document ID is removed from the old index key and added to the new key. This ensures MongoDB-compatible index behavior and correct query results.
-- **Debug Logging:** Debug logs are present for all index maintenance operations (`insertOne`, `updateOne`, index add/remove) and now also for index-backed queries (`findIdsForKey` in both S3 and memory backends). This enables full traceability of document and index activity.
-- **Test Isolation:** All S3 simulation and index/document tests use isolated state and logs per test. Index entry caches are cleared between simulated process restarts to ensure no cross-test contamination.
-- **Test Robustness:** Helpers and patterns are in place to ensure S3 state, logs, and caches are set up and cleared per test, matching production access patterns as closely as possible.
-- **No Source Copying:** All code is original and does not copy MongoDB source; API is MongoDB-like but implemented from scratch.
-- **Clean, Readable TypeScript:** Code is written to be clean, readable, and well-documented, prioritizing maintainability and clarity.
+### Index Entry Files
+- **Path:** `collection/indices/<indexName>/<key>.json`
+  - `<key>` is the encoded value(s) of the indexed field(s). For single-field indexes, this is the field value. For compound indexes, values are joined by `|` and each value is URI-encoded.
+- **Contents:** JSON array of document IDs (`_id`s) that have the indexed value(s).
 
-## Current Index Design Limitations
-- **Partial Key Matching:** Currently, an index is only used if the query matches the first key in the index. Additional keys in the index are only used if they are also present in the query, and only consecutive keys from the start are considered. This means queries that do not include the first key of an index cannot benefit from that index.
-- **No Full Index Scans:** There is no support for scanning the entire index or for range queries. Only exact matches on the leading key(s) are supported.
-- **No Sorting or Range Support:** The current design does not support using indexes for sorting or for range queries (e.g., `$gt`, `$lt`).
-- **No Compound Index Optimization:** While compound indexes are supported, only the leading prefix of the index is used for lookups. There is no optimization for queries that match non-leading keys.
-- **No Index Intersection:** Queries that could benefit from multiple indexes (index intersection) are not optimized; only a single best index is chosen per query.
-- **No Index Statistics or Cost-Based Selection:** Index selection is based on the number of consecutive leading keys matched, not on query statistics or cost estimation.
-- **No Automatic Index Rebuilding:** Indexes are only updated when documents are inserted or updated; there is no background or scheduled re-indexing.
+**Examples:**
+- Path: `pets/indices/name_1/Milo.json`
+- Contents:
+```json
+["64a1f2c3e4b5d6789a0b1c2d", "64a1f2c3e4b5d6789a0b1c2e"]
+```
+- Path: `pets/indices/name_1/Bella.json`
+- Contents:
+```json
+["64a1f2c3e4b5d6789a0b1c2f", "64a1f2c3e4b5d6789a0b1c30"]
+```
+- Path: `pets/indices/compound_1/Milo|dog.json` (for a compound index on `{ name: 1, type: 1 }`)
+- Contents:
+```json
+["64a1f2c3e4b5d6789a0b1c2d"]
+```
 
-## Lessons Learned
-- Test isolation is critical for robust S3-backed index/document testing
-- S3 simulation must match production key logic and access patterns
-- Index entry cache must be cleared between process restarts
-- Test helpers are essential for robust, independent test setup
-- S3 state and access logs must be per-test; no sharing between tests
+### How Indexes Are Used for Efficient Query Lookup
 
-## Future Goals
-- **Full Index Utilization:** Support for using indexes even when only non-leading keys are present in the query.
-- **Range and Sort Support:** Add support for range queries and sorting using indexes.
-- **Index Intersection:** Optimize queries using multiple indexes.
-- **Cost-Based Index Selection:** Use statistics to select the most efficient index for a query.
-- **Automatic Index Rebuilding:** Support background or scheduled re-indexing.
+When a query is issued (e.g., `find({ name: "Milo" })`), Sengo inspects all loaded index definitions for the collection and selects the best matching index. If an index exists on the queried field(s), the following process is used:
+
+1. **Index Key Generation:**
+   - The query values for the indexed fields are encoded to form the index key (e.g., for `{ name: "Milo" }`, the key is `Milo`).
+2. **Index Entry Lookup:**
+   - Sengo loads the corresponding index entry file from S3 (e.g., `pets/indices/name_1/Milo.json`).
+   - This file contains a flat array of document IDs (`_id`s) for all documents with that indexed value.
+3. **Document Fetch:**
+   - For each ID in the array, Sengo loads the document from S3 (e.g., `pets/data/<_id>.json`).
+   - Only the documents matching the query are returned (if the index is compound, all indexed fields must match).
+
+**Example:**
+- Query: `find({ name: "Milo" })`
+- Index used: `name_1` (on `{ name: 1 }`)
+- Sengo loads `pets/indices/name_1/Milo.json` → `["64a1f2c3e4b5d6789a0b1c2d", "64a1f2c3e4b5d6789a0b1c2e"]`
+- Loads `pets/data/64a1f2c3e4b5d6789a0b1c2d.json` and `pets/data/64a1f2c3e4b5d6789a0b1c2e.json`
+- Returns all documents with `name: "Milo"`
+
+This approach avoids scanning all documents in the collection, making lookups by indexed fields efficient even for large datasets. For compound indexes, the key is constructed from all indexed fields present in the query, and only exact matches on the leading fields are supported.
+
+### Notes
+- All index entry files are stored as flat arrays of string IDs.
+- Index entry files are created, updated, and deleted as documents are inserted, updated, or deleted.
+- The S3 layout is designed for efficient lookup and minimal cost, with each index entry and document as a separate S3 object.
+
+---

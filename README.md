@@ -66,26 +66,6 @@ For more details, see [shell/README.md](shell/README.md).
 
 - To use the client library, see `client/README.md` for details.
 
-## S3-Backed Index and Document Design
-
-- Each collection index is stored as a separate S3 object per key: `collection/indices/indexName/key.json`
-- Index entries are cached in-memory per process for efficiency
-- Index entry cache is cleared on process restart, ensuring S3 is the source of truth
-- All S3 accesses (read, write, delete) are logged in tests for verification
-
-## Testing and S3 Simulation
-
-- Tests use a custom `S3BucketSimulator` to simulate S3 state and log all accesses
-- Each test creates its own simulator instance and sets up its own S3 state from scratch
-- No S3 state or logs are shared between tests; all test expectations are based on per-test setup
-- Helpers are provided to set up S3 state for index entries and document files
-
-## Design Choices and Lessons Learned
-
-- Index entry cache must be cleared between process restarts to avoid stale data
-- S3 simulation must be per-test and not share state or logs
-- Tests must assert only on accesses relevant to their own setup
-
 ---
 
 For more information, see the individual [client/README.md](client/README.md) and [shell/README.md](shell/README.md) files in each package.
