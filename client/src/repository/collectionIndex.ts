@@ -4,11 +4,12 @@ import { IndexDefinition, IndexKeyRecord, NormalizedIndexKeyRecord, Order } from
 export interface CollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
-  addDocument(doc: Record<string, any>): Promise<void>;
-  removeDocument(doc: Record<string, any>): Promise<void>;
-  findIdsForKey(key: string): Promise<string[]>;
-  makeIndexKey(doc: Record<string, any>): string;
-  flush(): Promise<void>;
+  /**
+   * Update the index for a document update. Receives the old and new document.
+   * The index implementation should decide if any index maintenance is needed.
+   * This method should be idempotent and safe to call for any update.
+   */
+  updateIndexOnDocumentUpdate(oldDoc: Record<string, any>, newDoc: Record<string, any>): Promise<void>;
   isBusy?(): boolean;
   getStatus?(): { pendingInserts: number; runningTasks: number; avgPersistMs: number; estTimeToClearMs: number };
 }
@@ -40,8 +41,26 @@ export class IndexEntry {
 }
 
 export abstract class BaseCollectionIndex implements CollectionIndex {
+  // The following methods are required for subclasses but not exposed on the interface
   abstract removeDocument(doc: Record<string, any>): Promise<void>;
   abstract findIdsForKey(key: string): Promise<string[]>;
+  // ...existing code...
+  /**
+   * Default implementation for index update on document update.
+   * Removes the old doc from the old key if the key changes, then adds the new doc to the new key.
+   */
+  async updateIndexOnDocumentUpdate(oldDoc: Record<string, any>, newDoc: Record<string, any>): Promise<void> {
+    // Only call removeDocument if oldDoc has an _id
+    const oldKey = this.makeIndexKey(oldDoc);
+    const newKey = this.makeIndexKey(newDoc);
+    if (oldDoc && oldDoc._id && oldKey !== newKey && typeof (this.removeDocument) === 'function') {
+      await this.removeDocument(oldDoc);
+    }
+    await this.addDocument(newDoc);
+    if (typeof (this.flush) === 'function') {
+      await this.flush();
+    }
+  }
   name: string;
   keys: NormalizedIndexKeyRecord[];
   protected indexMap: Map<string, IndexEntry> = new Map();

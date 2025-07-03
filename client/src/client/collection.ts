@@ -32,13 +32,10 @@ export class SengoCollection {
     // Index maintenance: update all indexes
     for (const indexName in this._indexes) {
       const index = this._indexes[indexName];
-      if (typeof index.addDocument === 'function') {
-        console.log(`[SengoCollection.insertOne] Adding doc to index '${indexName}':`, JSON.stringify(docWithId));
-        await index.addDocument(docWithId);
-        if (typeof index.flush === 'function') {
-          await index.flush();
-        }
-      }
+      // Only call updateIndexOnDocumentUpdate, which is the public API
+      console.log(`[SengoCollection.insertOne] Adding doc to index '${indexName}':`, JSON.stringify(docWithId));
+      // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
+      await index.updateIndexOnDocumentUpdate({}, docWithId);
     }
     return { acknowledged: true, insertedId: docWithId._id };
   }
@@ -72,23 +69,11 @@ export class SengoCollection {
     // Save the updated doc
     await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
 
-    // Index maintenance: update all indexes (remove from old key, add to new key if indexed fields changed)
+    // Index maintenance: let each index handle the update logic
     for (const indexName in this._indexes) {
       const index = this._indexes[indexName];
-      if (typeof index.addDocument === 'function' && typeof index.makeIndexKey === 'function') {
-        // Compute old and new index keys
-        const oldKey = index.makeIndexKey(doc);
-        const newKey = index.makeIndexKey(updatedDoc);
-        if (oldKey !== newKey && typeof index.removeDocument === 'function') {
-          console.log(`[SengoCollection.updateOne] Removing doc from old index key '${oldKey}' in index '${indexName}':`, JSON.stringify(doc));
-          await index.removeDocument(doc);
-        }
-        // Always add to new key (covers both changed and unchanged)
-        console.log(`[SengoCollection.updateOne] Adding doc to new index key '${newKey}' in index '${indexName}':`, JSON.stringify(updatedDoc));
-        await index.addDocument(updatedDoc);
-        if (typeof index.flush === 'function') {
-          await index.flush();
-        }
+      if (typeof index.updateIndexOnDocumentUpdate === 'function') {
+        await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
       }
     }
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
