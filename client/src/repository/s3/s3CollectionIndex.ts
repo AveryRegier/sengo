@@ -32,17 +32,10 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param doc Document to remove
    */
   async removeDocument(doc: Record<string, any>): Promise<void> {
-    if (!doc._id) throw new Error('Document must have an _id');
+    await super.removeDocument(doc);
     const key = this.makeIndexKey(doc);
-    let entry = this.indexMap.get(key);
-    if (!entry) {
-      // Fetch from S3 here to merge with any existing entry
-      entry = await this.fetch(key);
-      this.indexMap.set(key, entry);
-    }
-    if (entry.ids.has(doc._id)) {
-      entry.ids.delete(doc._id);
-      entry.dirty = true;
+    const entry = this.indexMap.get(key);
+    if (entry && entry.dirty) {
       await this.persist(key, entry);
     }
   }

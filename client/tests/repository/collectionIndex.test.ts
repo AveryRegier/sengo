@@ -21,12 +21,14 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     client = new SengoClient('memory');
     const collectionName = 'col_' + chance.hash({ length: 8 });
     collection = client.db().collection(collectionName);
-    // Create some docs with random structure
-    docs = Array.from({ length: 3 }, docCreator);
-    // Insert initial docs
-    for (const doc of docs) {
-        await collection.insertOne(doc);
-    }  
+    // Create and insert docs, capturing their _id
+    docs = [];
+    for (let i = 0; i < 3; i++) {
+      const doc = docCreator();
+      const result = await collection.insertOne(doc);
+      doc._id = result.insertedId;
+      docs.push(doc);
+    }
   });
 
   afterEach(async () => {
@@ -88,10 +90,35 @@ describe('SengoCollection createIndex and find (Memory)', () => {
       const map = index.getIndexMap();
       const allIds = Object.values(map).flat();
       for (const doc of docs) {
-        expect(allIds).toContain(doc._id.toString ? doc._id.toString() : doc._id);
+        expect(allIds).toContain(doc._id.toString());
       }
     }
   });
 
+  it('removes document ID from old index entry and adds to new one when indexed field changes on update', async () => {
+    // Insert a doc with a specific indexed field
+    const doc = { ...docCreator(), foo: 'A' };
+    const insertResult = await collection.insertOne(doc);
+    const docId = insertResult.insertedId.toString();
+    const indexName = await collection.createIndex({ foo: 1 });
+    const index = (collection.store as any).lastIndexInstance;
+    if (index && typeof index.flush === 'function') {
+      await index.flush();
+    }
+    // Update the doc, changing foo from 'A' to 'B'
+    await collection.updateOne({ _id: docId }, { $set: { foo: 'B' } });
+    if (index && typeof index.flush === 'function') {
+      await index.flush();
+    }
+    // Check memory index state: old index entry (foo:'A') should NOT contain doc, new entry (foo:'B') should
+    const oldKey = 'A';
+    const newKey = 'B';
+    const oldEntry = index.indexMap.get(oldKey);
+    const newEntry = index.indexMap.get(newKey);
+    const oldIds = oldEntry ? oldEntry.toArray() : [];
+    const newIds = newEntry ? newEntry.toArray() : [];
+    expect(oldIds).not.toContain(docId);
+    expect(newIds).toContain(docId);
+  });
   // ...existing code...
 });

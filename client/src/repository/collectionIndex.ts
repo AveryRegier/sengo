@@ -91,7 +91,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
       entry = await this.fetch(key);
       this.indexMap.set(key, entry);
     }
-    entry.add(doc._id);
+    entry.add(doc._id.toString());
   }
 
   public makeIndexKey(doc: Record<string, any>): string {
@@ -107,7 +107,24 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   // --- Abstract methods (must be implemented by subclass) ---
-  abstract removeDocument(doc: Record<string, any>): Promise<void>;
+  /**
+   * Remove a document from the index for the appropriate key.
+   * Subclasses may override to add persistence or other side effects.
+   */
+  public async removeDocument(doc: Record<string, any>): Promise<void> {
+    if (!doc._id) throw new Error('Document must have an _id');
+    const key = this.makeIndexKey(doc);
+    let entry = this.indexMap.get(key);
+    if (!entry) {
+      entry = await this.fetch(key);
+      this.indexMap.set(key, entry);
+    }
+    const idStr = doc._id.toString();
+    if (entry.ids.has(idStr)) {
+      entry.ids.delete(idStr);
+      entry.dirty = true;
+    }
+  }
   abstract findIdsForKey(key: string): Promise<string[]>;
 
   // --- Protected methods ---

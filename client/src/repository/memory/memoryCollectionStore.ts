@@ -5,19 +5,7 @@ import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
 export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
-  async removeDocument(doc: Record<string, any>): Promise<void> {
-    if (!doc._id) throw new Error('Document must have an _id');
-    const key = this.makeIndexKey(doc);
-    let entry = this.indexMap.get(key);
-    if (!entry) {
-      entry = await this.fetch(key);
-      this.indexMap.set(key, entry);
-    }
-    if (entry.ids.has(doc._id)) {
-      entry.ids.delete(doc._id);
-      entry.dirty = true;
-    }
-  }
+  // Inherits removeDocument from BaseCollectionIndex
 
   async findIdsForKey(key: string): Promise<string[]> {
     let entry = this.indexMap.get(key);
@@ -31,6 +19,8 @@ export class MemoryCollectionIndex extends BaseCollectionIndex implements Collec
 }
 
 export class MemoryCollectionStore implements CollectionStore {
+  // Expose last created index for testing
+  public lastIndexInstance?: MemoryCollectionIndex;
   private documents: Record<string, any>[] = [];
   name: string;
   private closed = false;
@@ -92,6 +82,7 @@ export class MemoryCollectionStore implements CollectionStore {
       await index.addDocument(doc);
     }
     this.indexes.set(name, index);
+    this.lastIndexInstance = index;
     return index;
   }
 
