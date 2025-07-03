@@ -1,6 +1,6 @@
 import { S3CollectionStore } from '../../../src/repository/s3/s3CollectionStore';
 import type { S3CollectionStoreOptions } from '../../../src/repository/s3/s3CollectionStore';
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { S3BucketSimulator } from './S3BucketSimulator';
 
@@ -10,6 +10,7 @@ vi.mock('@aws-sdk/client-s3', async () => {
     GetObjectCommand: function(input: any) { return { type: 'GetObjectCommand', input }; },
     PutObjectCommand: function(input: any) { return { type: 'PutObjectCommand', input }; },
     ListObjectsV2Command: function(input: any) { return { type: 'ListObjectsV2Command', input }; },
+    DeleteObjectCommand: function(input: any) { return { type: 'DeleteObjectCommand', input }; },
     // Add other S3 commands as needed
   };
 });
@@ -108,5 +109,18 @@ describe('S3CollectionStore', () => {
     await store.close();
     await expect(store.replaceOne({ _id: 'fuzzy' }, { _id: 'fuzzy', name: 'fuzzy' })).rejects.toThrow('Store is closed');
     await expect(store.find({ _id: 'abc' })).rejects.toThrow('Store is closed');
+  });
+
+  it('can insert and delete a document by _id', async () => {
+    const store = new S3CollectionStore(collection, bucket, opts);
+    (store as any).s3 = s3Client;
+    const doc = { _id: 'del1', foo: 123 };
+    await store.replaceOne({ _id: doc._id }, doc);
+    // Confirm present
+    expect(s3sim.getFile(`${collection}/data/del1.json`)).toBe(JSON.stringify(doc));
+    // Delete
+    await store.deleteOneById(doc._id);
+    // Should be gone
+    expect(s3sim.getFile(`${collection}/data/del1.json`)).toBeUndefined();
   });
 });

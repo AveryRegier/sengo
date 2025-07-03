@@ -1,6 +1,8 @@
 
 
+
 import type { CollectionStore } from '../index';
+import { notImplementedMongo } from '../../utils';
 import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
@@ -19,6 +21,7 @@ export class MemoryCollectionIndex extends BaseCollectionIndex implements Collec
 }
 
 export class MemoryCollectionStore implements CollectionStore {
+
   // Expose last created index for testing
   public lastIndexInstance?: MemoryCollectionIndex;
   private documents: Record<string, any>[] = [];
@@ -63,6 +66,23 @@ export class MemoryCollectionStore implements CollectionStore {
       this.documents.push({ ...doc });
     }
     return Promise.resolve();
+  }
+
+  /**
+   * Deletes a document by _id.
+   * @param id Document _id
+   */
+  async deleteOneById(id: any): Promise<void> {
+    this.checkClosure();
+    const idx = this.documents.findIndex(d => d._id?.toString() === id?.toString());
+    if (idx === -1) return;
+    const [removed] = this.documents.splice(idx, 1);
+    // Remove from all indexes
+    for (const index of this.indexes.values()) {
+      if (typeof index.removeDocument === 'function') {
+        await index.removeDocument(removed);
+      }
+    }
   }
 
   async close() {

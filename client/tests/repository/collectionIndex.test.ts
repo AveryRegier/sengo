@@ -26,8 +26,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     for (let i = 0; i < 3; i++) {
       const doc = docCreator();
       const result = await collection.insertOne(doc);
-      doc._id = result.insertedId;
-      docs.push(doc);
+      docs.push({ ...doc, _id: result.insertedId });
     }
   });
 
@@ -129,10 +128,47 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     expect(found.length).toBe(1);
     expect(found[0]._id.toString()).toBe(docId.toString());
     // Delete the document
-    await collection.deleteOne({ _id: docId });
+    const result = await collection.deleteOne({ _id: docId });
+    expect(result).toEqual({ deletedCount: 1 });
     // Should not be found after deletion
     found = await collection.find({ _id: docId });
     expect(found.length).toBe(0);
   });
+
+  it('deleteOne with non-_id filter deletes the first matching document', async () => {
+    // Insert two docs with the same foo value
+    const doc1 = { ...docCreator(), foo: 'X' };
+    const doc2 = { ...docCreator(), foo: 'X' };
+    const res1 = await collection.insertOne(doc1);
+    const res2 = await collection.insertOne(doc2);
+    // _id is assigned by insertOne, so use res1.insertedId and res2.insertedId for later checks if needed
+    // Delete one by foo
+    const result = await collection.deleteOne({ foo: 'X' });
+    expect(result).toEqual({ deletedCount: 1 });
+    // Only one should be deleted
+    let found = await collection.find({ foo: 'X' });
+    expect(found.length).toBe(1);
+    // The remaining doc should be one of the two
+    expect([
+      res1.insertedId.toString(),
+      res2.insertedId.toString(),
+    ]).toContain(found[0]._id.toString());
+  });
   // ...existing code...
+
+  it('deleteOne can delete by a non-_id field (e.g. email)', async () => {
+    const doc = { ...docCreator(), foo: 'Y' };
+    const insertResult = await collection.insertOne(doc);
+    const docWithId = { ...doc, _id: insertResult.insertedId };
+    // Should be found before deletion
+    let found = await collection.find({ email: doc.email });
+    expect(found.length).toBe(1);
+    expect(found[0]._id.toString()).toBe(docWithId._id.toString());
+    // Delete by email
+    const result = await collection.deleteOne({ email: doc.email });
+    expect(result).toEqual({ deletedCount: 1 });
+    // Should not be found after deletion
+    found = await collection.find({ email: doc.email });
+    expect(found.length).toBe(0);
+  });
 });

@@ -66,4 +66,17 @@ describe('MemoryCollectionStore', () => {
     // New key should contain doc1
     expect(map['2'] || []).toContain('doc1');
   });
+
+  it('can insert and delete a document by _id', async () => {
+    const doc = { _id: 'del1', foo: 123 };
+    await store.replaceOne({ _id: doc._id }, doc);
+    // Confirm present
+    let found = store.find({ _id: doc._id });
+    expect(found.length).toBe(1);
+    // Delete
+    await store.deleteOneById(doc._id);
+    // Should be gone
+    found = store.find({ _id: doc._id });
+    expect(found.length).toBe(0);
+  });
 });

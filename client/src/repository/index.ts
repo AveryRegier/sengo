@@ -12,6 +12,10 @@ export interface CollectionStore {
   find(query: Record<string, any>): Promise<Record<string, any>[]> | Record<string, any>[];
   createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex>;
   dropIndex(name: string): Promise<void>;
+  /**
+   * Delete a document by _id. Must be implemented by all stores.
+   */
+  deleteOneById(id: any): Promise<void>;
 }
 
 export interface DbStore {

@@ -85,7 +85,17 @@ export class SengoCollection {
    * Delete a single document matching the filter (MongoDB compatible: deleteOne)
    */
   async deleteOne(filter: Record<string, any>) {
-    notImplementedMongo('deleteOne');
+    // Find the first matching document
+    const found = await this.find(filter);
+    if (!found || found.length === 0) {
+      return { deletedCount: 0 };
+    }
+    const doc = found[0];
+    const docId = doc._id;
+    // Call the store to delete by _id
+    await this.store.deleteOneById(docId);
+    // Remove from indexes if needed (index maintenance handled in store or here as needed)
+    return { deletedCount: 1 };
   }
 
   async createIndex(keys: Record<string, 1 | -1 | 'text'>): Promise<string> {

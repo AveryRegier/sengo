@@ -92,6 +92,21 @@ export class S3CollectionStore implements CollectionStore {
   }
 
   /**
+   * Deletes a document by _id from S3.
+   * @param id Document _id
+   */
+  async deleteOneById(id: any): Promise<void> {
+    if (this.closed) throw new Error('Store is closed');
+    if (!id) throw new Error('deleteOneById requires id');
+    const key = `${this.collection}/data/${id}.json`;
+    await this.s3.send(new DeleteObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+    }));
+    // TODO: Remove from indexes as well
+  }
+
+  /**
    * Find the best matching index for the query based on NormalizedIndexKeyRecord.
    * Only the first key in the index must be present in the query to use the index.
    */
