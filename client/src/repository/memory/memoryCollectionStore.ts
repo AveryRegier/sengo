@@ -1,16 +1,33 @@
+
+
+
 import type { CollectionStore } from '../index';
+import { notImplementedMongo } from '../../utils';
 import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
-
 export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
-  // In-memory index implementation
+  // Inherits removeDocument from BaseCollectionIndex
+
+  async findIdsForKey(key: string): Promise<string[]> {
+    let entry = this.indexMap.get(key);
+    if (!entry) {
+      entry = await this.fetch(key);
+      this.indexMap.set(key, entry);
+    }
+    console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
+    return entry.toArray();
+  }
 }
 
 export class MemoryCollectionStore implements CollectionStore {
+
+  // Expose last created index for testing
+  public lastIndexInstance?: MemoryCollectionIndex;
   private documents: Record<string, any>[] = [];
   name: string;
   private closed = false;
+  private indexes: Map<string, MemoryCollectionIndex> = new Map();
   constructor(name?: string) {
     this.name = name || '';
   }
@@ -51,6 +68,23 @@ export class MemoryCollectionStore implements CollectionStore {
     return Promise.resolve();
   }
 
+  /**
+   * Deletes a document by _id.
+   * @param id Document _id
+   */
+  async deleteOneById(id: any): Promise<void> {
+    this.checkClosure();
+    const idx = this.documents.findIndex(d => d._id?.toString() === id?.toString());
+    if (idx === -1) return;
+    const [removed] = this.documents.splice(idx, 1);
+    // Remove from all indexes
+    for (const index of this.indexes.values()) {
+      if (typeof index.removeDocument === 'function') {
+        await index.removeDocument(removed);
+      }
+    }
+  }
+
   async close() {
     this.closed = true;
   }
@@ -59,6 +93,7 @@ export class MemoryCollectionStore implements CollectionStore {
     return this.closed;
   }
 
+
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
     this.checkClosure();
     const index = new MemoryCollectionIndex(name, keys);
@@ -66,6 +101,20 @@ export class MemoryCollectionStore implements CollectionStore {
     for (const doc of this.documents) {
       await index.addDocument(doc);
     }
+    this.indexes.set(name, index);
+    this.lastIndexInstance = index;
     return index;
+  }
+
+  /**
+   * Get an index by name (for testing only)
+   */
+  getIndex(name: string): MemoryCollectionIndex | undefined {
+    return this.indexes.get(name);
+  }
+
+  async dropIndex(name: string): Promise<void> {
+    this.checkClosure();
+    this.indexes.delete(name);
   }
 }

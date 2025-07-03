@@ -1,14 +1,26 @@
-import { normalizeIndexKeys, type CollectionStore } from '../repository/index';
+import { CollectionIndex, IndexDefinition, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
+
+import { notImplementedMongo } from '../utils';
 
 export class SengoCollection {
   name: string;
   store: CollectionStore;
   static collections: Record<string, SengoCollection> = {};
+  private _indexes: Record<string, CollectionIndex> = {};
 
   constructor(name: string, store: CollectionStore) {
     this.name = name;
     this.store = store;
+  }
+
+  /**
+   * Drop an index by name (MongoDB compatible: dropIndex)
+   */
+  async dropIndex(name: string): Promise<void> {
+    return this.store.dropIndex(name).then(() => {
+      delete this._indexes[name];
+    });
   }
 
   async insertOne(doc: Record<string, any>) {
@@ -17,12 +29,23 @@ export class SengoCollection {
       throw new Error('Store is closed');
     }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
+    console.log('[SengoCollection.insertOne] Inserting:', JSON.stringify(docWithId));
     await this.store.replaceOne({ _id: docWithId._id }, docWithId);
+    // Index maintenance: update all indexes
+    for (const indexName in this._indexes) {
+      const index = this._indexes[indexName];
+      // Only call updateIndexOnDocumentUpdate, which is the public API
+      console.log(`[SengoCollection.insertOne] Adding doc to index '${indexName}':`, JSON.stringify(docWithId));
+      // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
+      await index.updateIndexOnDocumentUpdate({}, docWithId);
+    }
     return { acknowledged: true, insertedId: docWithId._id };
   }
 
   async find(query: Record<string, any>) {
-    return this.store.find(query);
+    const result = this.store.find(query);
+    console.log('[SengoCollection.find] Query:', JSON.stringify(query), 'Result:', JSON.stringify(result));
+    return result;
   }
 
   async updateOne(filter: Record<string, any>, update: Record<string, any>) {
@@ -47,7 +70,32 @@ export class SengoCollection {
     }
     // Save the updated doc
     await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
+
+    // Index maintenance: let each index handle the update logic
+    for (const indexName in this._indexes) {
+      const index = this._indexes[indexName];
+      if (typeof index.updateIndexOnDocumentUpdate === 'function') {
+        await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+      }
+    }
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+  }
+
+  /**
+   * Delete a single document matching the filter (MongoDB compatible: deleteOne)
+   */
+  async deleteOne(filter: Record<string, any>) {
+    // Find the first matching document
+    const found = await this.find(filter);
+    if (!found || found.length === 0) {
+      return { deletedCount: 0 };
+    }
+    const doc = found[0];
+    const docId = doc._id;
+    // Call the store to delete by _id
+    await this.store.deleteOneById(docId);
+    // Remove from indexes if needed (index maintenance handled in store or here as needed)
+    return { deletedCount: 1 };
   }
 
   async createIndex(keys: Record<string, 1 | -1 | 'text'>): Promise<string> {
@@ -70,6 +118,8 @@ export class SengoCollection {
         await (index as any).addDocument(doc);
       }
     }
+    // Track the index for future maintenance
+    this._indexes[fields || 'default_index'] = index;
     return fields || 'default_index';
   }
 }

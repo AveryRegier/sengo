@@ -15,7 +15,7 @@ export class S3Store {
     if (!this.stores[name]) {
       this.stores[name] = new S3CollectionStore(name, this.bucket);
     }
-    return this.stores[name];
+    return this.stores[name] as CollectionStore;
   }
 
   async close() {
