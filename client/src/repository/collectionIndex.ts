@@ -4,6 +4,11 @@ import { IndexDefinition, IndexKeyRecord, NormalizedIndexKeyRecord, Order } from
 export interface CollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
+  addDocument(doc: Record<string, any>): Promise<void>;
+  removeDocument(doc: Record<string, any>): Promise<void>;
+  findIdsForKey(key: string): Promise<string[]>;
+  makeIndexKey(doc: Record<string, any>): string;
+  flush(): Promise<void>;
   isBusy?(): boolean;
   getStatus?(): { pendingInserts: number; runningTasks: number; avgPersistMs: number; estTimeToClearMs: number };
 }
@@ -34,7 +39,9 @@ export class IndexEntry {
   }
 }
 
-export abstract class BaseCollectionIndex {
+export abstract class BaseCollectionIndex implements CollectionIndex {
+  abstract removeDocument(doc: Record<string, any>): Promise<void>;
+  abstract findIdsForKey(key: string): Promise<string[]>;
   name: string;
   keys: NormalizedIndexKeyRecord[];
   protected indexMap: Map<string, IndexEntry> = new Map();
@@ -60,7 +67,7 @@ export abstract class BaseCollectionIndex {
     entry.add(doc._id);
   }
 
-  protected makeIndexKey(doc: Record<string, any>): string {
+  makeIndexKey(doc: Record<string, any>): string {
     // Only use the field values, not the order or field name, for the key
     // For a single key: { foo: 1 } => '1'
     // For multiple keys: { foo: 1, bar: -1 } => '1|-1'

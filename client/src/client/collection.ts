@@ -1,11 +1,11 @@
-import { normalizeIndexKeys, type CollectionStore } from '../repository/index';
+import { CollectionIndex, IndexDefinition, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 
 export class SengoCollection {
   name: string;
   store: CollectionStore;
   static collections: Record<string, SengoCollection> = {};
-  private _indexes: Record<string, any> = {};
+  private _indexes: Record<string, CollectionIndex> = {};
 
   constructor(name: string, store: CollectionStore) {
     this.name = name;
@@ -16,8 +16,9 @@ export class SengoCollection {
    * Drop an index by name (MongoDB compatible: dropIndex)
    */
   async dropIndex(name: string): Promise<void> {
-    await this.store.dropIndex(name);
-    delete this._indexes[name];
+    return this.store.dropIndex(name).then(() => {
+      delete this._indexes[name];
+    });
   }
 
   async insertOne(doc: Record<string, any>) {
