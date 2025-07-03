@@ -7,7 +7,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspace=client && npm run build --workspace=shell",
-    "clean": "npm run clean --workspace=client && npm run clean --workspace=shell",
+    "clean": "rimraf --glob build && npm run clean --workspace=client && npm run clean --workspace=shell",
     "start": "npm run start --workspace=shell",
     "test": "npm run test --workspace=client && npm run test --workspace=shell",
     "verify": "npm run clean && npm run build && npm test"

@@ -20,7 +20,7 @@
     "postbuild:fix-extensions": "node ./scripts/postbuild-fix-extensions.cjs",
     "test": "vitest run",
     "test:ui": "vitest",
-    "clean": "rimraf build build-cjs dist *.tsbuildinfo ./src/**/*.js",
+    "clean": "rimraf build build-cjs dist *.tsbuildinfo ./src/**/*.js ./src/**/*.test.ts  src/testutils",
     "verify": "npm run clean && npm run build && npm test",
     "build:dist": "node ./scripts/build-dist.cjs",
     "dist:bump:patch": "npm run build:dist -- --bump=patch",
