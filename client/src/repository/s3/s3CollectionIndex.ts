@@ -4,6 +4,7 @@ import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex, IndexEntry } from '../collectionIndex';
 import { MongoNetworkError } from './s3CollectionStore';
 
+
 /**
  * S3-backed CollectionIndex that persists index entries per key to S3.
  *
@@ -26,19 +27,6 @@ import { MongoNetworkError } from './s3CollectionStore';
  * - No S3 state or logs are shared between tests
  */
 export class S3CollectionIndex extends BaseCollectionIndex {
-  /**
-   * Remove a document from the index for the appropriate key.
-   * Fetches from S3 if entry is not in memory, removes ID, and persists if needed.
-   * @param doc Document to remove
-   */
-  async removeDocument(doc: Record<string, any>): Promise<void> {
-    await super.removeDocument(doc);
-    const key = this.makeIndexKey(doc);
-    const entry = this.indexMap.get(key);
-    if (entry && entry.dirty) {
-      await this.persist(key, entry);
-    }
-  }
   private s3: S3Client;
   private collectionName: string;
   private bucket: string;
@@ -63,6 +51,36 @@ export class S3CollectionIndex extends BaseCollectionIndex {
     this.s3 = opts.s3;
     this.collectionName = opts.collectionName;
     this.bucket = opts.bucket;
+  }
+
+  /**
+   * Remove a document ID from all index keys in memory and persist changes.
+   * This is used for deleteOneById to ensure the ID is removed from all index entries.
+   * @param id Document _id to remove
+   */
+  async removeIdFromAllKeys(id: string): Promise<void> {
+    const idStr = id.toString();
+    for (const [key, entry] of this.indexMap.entries()) {
+      if (entry.ids.has(idStr)) {
+        entry.ids.delete(idStr);
+        entry.dirty = true;
+        await this.persist(key, entry);
+      }
+    }
+  }
+
+    /**
+   * Remove a document from the index for the appropriate key.
+   * Fetches from S3 if entry is not in memory, removes ID, and persists if needed.
+   * @param doc Document to remove
+   */
+  async removeDocument(doc: Record<string, any>): Promise<void> {
+    await super.removeDocument(doc);
+    const key = this.makeIndexKey(doc);
+    const entry = this.indexMap.get(key);
+    if (entry && entry.dirty) {
+      await this.persist(key, entry);
+    }
   }
 
   /**

@@ -103,7 +103,11 @@ export class S3CollectionStore implements CollectionStore {
       Bucket: this.bucket,
       Key: key,
     }));
-    // TODO: Remove from indexes as well
+    // Remove from all indexes
+    await this.ensureIndexesLoaded();
+    for (const index of this.loadedIndexes.values()) {
+      await index.removeIdFromAllKeys(id);
+    }
   }
 
   /**

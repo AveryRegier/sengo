@@ -133,6 +133,14 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     // Should not be found after deletion
     found = await collection.find({ _id: docId });
     expect(found.length).toBe(0);
+    // _id should be removed from all indexes
+    if ((collection.store as any).lastIndexInstance) {
+      const index = (collection.store as any).lastIndexInstance;
+      for (const [key, entry] of index.indexMap.entries()) {
+        const ids = entry.toArray();
+        expect(ids).not.toContain(docId.toString());
+      }
+    }
   });
 
   it('deleteOne with non-_id filter deletes the first matching document', async () => {
@@ -153,6 +161,15 @@ describe('SengoCollection createIndex and find (Memory)', () => {
       res1.insertedId.toString(),
       res2.insertedId.toString(),
     ]).toContain(found[0]._id.toString());
+    // The deleted _id should be removed from all indexes
+    const deletedId = [res1.insertedId.toString(), res2.insertedId.toString()].find(id => id !== found[0]._id.toString());
+    if ((collection.store as any).lastIndexInstance) {
+      const index = (collection.store as any).lastIndexInstance;
+      for (const [key, entry] of index.indexMap.entries()) {
+        const ids = entry.toArray();
+        expect(ids).not.toContain(deletedId);
+      }
+    }
   });
   // ...existing code...
 
@@ -170,5 +187,13 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     // Should not be found after deletion
     found = await collection.find({ email: doc.email });
     expect(found.length).toBe(0);
+    // _id should be removed from all indexes
+    if ((collection.store as any).lastIndexInstance) {
+      const index = (collection.store as any).lastIndexInstance;
+      for (const [key, entry] of index.indexMap.entries()) {
+        const ids = entry.toArray();
+        expect(ids).not.toContain(docWithId._id.toString());
+      }
+    }
   });
 });
