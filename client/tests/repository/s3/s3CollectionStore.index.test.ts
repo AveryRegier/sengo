@@ -396,4 +396,6 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
     expect(oldIds).not.toContain('doc1');
     expect(newIds).toContain('doc1');
   });
+
+  // ...existing code...
 });

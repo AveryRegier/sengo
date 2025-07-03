@@ -92,4 +92,6 @@ describe('SengoCollection createIndex and find (Memory)', () => {
       }
     }
   });
+
+  // ...existing code...
 });
