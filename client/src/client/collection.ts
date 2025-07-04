@@ -1,7 +1,7 @@
-import { CollectionIndex, IndexDefinition, normalizeIndexKeys, type CollectionStore } from '../repository/index';
+import { MongoClientClosedError, MongoServerError } from '../errors.js';
+import { CollectionIndex, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
-
-import { notImplementedMongo } from '../utils';
+import { IndexDefinition } from '../types';
 
 export class SengoCollection {
   name: string;
@@ -26,7 +26,7 @@ export class SengoCollection {
   async insertOne(doc: Record<string, any>) {
     // Check for closed store (if supported)
     if (typeof (this.store as any).isClosed === 'function' && (this.store as any).isClosed()) {
-      throw new Error('Store is closed');
+      throw new MongoClientClosedError('Store is closed');
     }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
     console.log('[SengoCollection.insertOne] Inserting:', JSON.stringify(docWithId));
@@ -63,10 +63,9 @@ export class SengoCollection {
       updatedDoc = { ...updatedDoc, ...update.$set };
     } else {
       // If no supported update operator, throw MongoDB-like error
-      throw Object.assign(new Error('Update document must contain update operators (e.g. $set). Full document replacement is not yet supported.'), {
-        code: 9, // MongoDB's FailedToParse
-        name: 'MongoServerError',
-      });
+      const err = new MongoServerError('Update document must contain update operators (e.g. $set). Full document replacement is not yet supported.');
+      err.code = 9; // MongoDB's FailedToParse
+      throw err;
     }
     // Save the updated doc
     await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
@@ -98,7 +97,7 @@ export class SengoCollection {
     return { deletedCount: 1 };
   }
 
-  async createIndex(keys: Record<string, 1 | -1 | 'text'>): Promise<string> {
+  async createIndex(keys: IndexDefinition | IndexDefinition[]): Promise<string> {
     const normalizedKeys = normalizeIndexKeys(keys);
     // MongoDB-like index name: e.g. { name: 1, age: -1 } => 'name_1_age_-1'
     const fields = normalizedKeys.map(({ field, order }) => `${field}_${order}`).join('_');

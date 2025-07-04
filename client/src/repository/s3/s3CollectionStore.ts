@@ -1,4 +1,4 @@
-
+import { MongoClientClosedError, MongoInvalidArgumentError, MongoServerError } from '../../errors.js'; // Import MongoDB error classes
 // (stray dropIndex removed, now only in class body)
 import type { CollectionIndex } from '../collectionIndex';
 import { S3CollectionIndex } from './s3CollectionIndex';
@@ -39,7 +39,7 @@ export class S3CollectionStore implements CollectionStore {
   }
 
   async dropIndex(name: string): Promise<void> {
-    if (this.closed) throw new Error('Store is closed');
+    if (this.closed) throw new MongoClientClosedError('Store is closed');
     await this.ensureIndexesLoaded();
     // Delete index metadata file
     const metaKey = `${this.collection}/indices/${name}.json`;
@@ -77,9 +77,9 @@ export class S3CollectionStore implements CollectionStore {
   }
 
   async replaceOne(filter: Record<string, any>, doc: Record<string, any>) {
-    if (this.closed) throw new Error('Store is closed');
+    if (this.closed) throw new MongoClientClosedError('Store is closed');
     const _id = filter._id ?? doc._id;
-    if (!_id) throw new Error('replaceOne requires _id');
+    if (!_id) throw new MongoInvalidArgumentError('replaceOne requires _id');
     const key = `${this.collection}/data/${_id}.json`;
     const body = JSON.stringify(doc);
     await this.s3.send(new PutObjectCommand({
@@ -96,8 +96,8 @@ export class S3CollectionStore implements CollectionStore {
    * @param id Document _id
    */
   async deleteOneById(id: any): Promise<void> {
-    if (this.closed) throw new Error('Store is closed');
-    if (!id) throw new Error('deleteOneById requires id');
+    if (this.closed) throw new MongoClientClosedError('Store is closed');
+    if (!id) throw new MongoInvalidArgumentError('deleteOneById requires id');
     const key = `${this.collection}/data/${id}.json`;
     await this.s3.send(new DeleteObjectCommand({
       Bucket: this.bucket,
@@ -139,7 +139,7 @@ export class S3CollectionStore implements CollectionStore {
   }
 
   async find(query: Record<string, any>) {
-    if (this.closed) throw new Error('Store is closed');
+    if (this.closed) throw new MongoClientClosedError('Store is closed');
     await this.ensureIndexesLoaded();
     // Select the best matching index (first key must match)
     const index = this.findBestIndex(query);
@@ -168,7 +168,7 @@ export class S3CollectionStore implements CollectionStore {
             Bucket: this.bucket,
             Key: docKey,
           }));
-          if (!result || !result.Body) throw Object.assign(new Error('Not found'), { name: 'NoSuchKey' });
+          if (!result || !result.Body) throw Object.assign(new MongoServerError('Not found'), { name: 'NoSuchKey' });
           const stream = result.Body as Readable;
           const data = await new Promise<string>((resolve, reject) => {
             let str = '';
@@ -205,7 +205,7 @@ export class S3CollectionStore implements CollectionStore {
           Bucket: this.bucket,
           Key: key,
         }));
-        if (!result || !result.Body) throw Object.assign(new Error('Not found'), { name: 'NoSuchKey' });
+        if (!result || !result.Body) throw Object.assign(new MongoServerError('Not found'), { name: 'NoSuchKey' });
         const stream = result.Body as Readable;
         const data = await new Promise<string>((resolve, reject) => {
           let str = '';

@@ -1,3 +1,5 @@
 // Entry point for the Sengo library
-export { SengoClient } from './client/client.js';
-
+export { SengoClient } from './client/client';
+export * from './client/collection';
+export * from './types';
+export * from './errors';

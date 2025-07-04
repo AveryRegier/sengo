@@ -1,4 +1,6 @@
-import { IndexDefinition, IndexKeyRecord, NormalizedIndexKeyRecord, Order } from ".";
+import { IndexDefinition, IndexKeyRecord, Order } from "../types";
+import { MongoInvalidArgumentError } from '../errors.js';
+import { NormalizedIndexKeyRecord } from ".";
 
 export interface CollectionIndex {
   name: string;
@@ -84,7 +86,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   public async addDocument(doc: Record<string, any>): Promise<void> {
-    if (!doc._id) throw new Error('Document must have an _id');
+    if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
     const key = this.makeIndexKey(doc);
     let entry = this.indexMap.get(key);
     if (!entry) {
@@ -112,7 +114,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
    * Subclasses may override to add persistence or other side effects.
    */
   public async removeDocument(doc: Record<string, any>): Promise<void> {
-    if (!doc._id) throw new Error('Document must have an _id');
+    if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
     const key = this.makeIndexKey(doc);
     let entry = this.indexMap.get(key);
     if (!entry) {
@@ -136,7 +138,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
 
 export function normalizeIndexKeys(keys: IndexDefinition | IndexDefinition[]): NormalizedIndexKeyRecord[] {
     if (!keys) {
-      throw new Error('Keys must be defined for creating an index');
+      throw new MongoInvalidArgumentError('Keys must be defined for creating an index');
     }
     let keysArray: IndexDefinition[];
     if (!Array.isArray(keys)) {
@@ -150,7 +152,7 @@ export function normalizeIndexKeys(keys: IndexDefinition | IndexDefinition[]): N
       } else if (typeof key === 'object') {
         return Object.entries(key as IndexKeyRecord).map(([field, order]) => ({ field, order }));
       } else {
-        throw new Error('Invalid index key format');
+        throw new MongoInvalidArgumentError('Invalid index key format');
       }
     }).flat();
     return normalizedKeys;

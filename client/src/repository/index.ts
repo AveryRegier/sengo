@@ -1,10 +1,15 @@
+import { Order } from '../types';
+import { CollectionIndex } from './collectionIndex';
 import { MemoryStore } from './memory/index';
-import { S3Store } from './s3/s3Store';
-import type { CollectionIndex } from './collectionIndex';
+import { S3Store } from './s3/index';
 
-export type Order = 1 | -1 | 'text';
-export type IndexKeyRecord = Record<string, Order>;
-export type IndexDefinition = string | IndexKeyRecord;
+// Export memory and S3 stores
+export { MemoryStore, MemoryCollectionStore } from './memory/index';
+export { S3Store, S3CollectionStore, S3CollectionIndex } from './s3/index';
+export type { CollectionIndex } from './collectionIndex';
+export * from './collectionIndex';
+
+
 export type NormalizedIndexKeyRecord = { field: string, order: Order };
 
 export interface CollectionStore {
@@ -18,18 +23,18 @@ export interface CollectionStore {
   deleteOneById(id: any): Promise<void>;
 }
 
+
 export interface DbStore {
   collection(name: string): CollectionStore;
   close(): Promise<void>;
 }
 
 export function createRepository(name: string): DbStore {
+
+
   if (name !== 'memory') {
     return new S3Store(name);
-  } else {  
+  } else {
     return new MemoryStore();
   }
 }
-
-export * from './collectionIndex';
-

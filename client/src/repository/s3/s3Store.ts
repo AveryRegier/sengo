@@ -1,5 +1,6 @@
 import type { CollectionStore } from '../index';
 import { S3CollectionStore } from './s3CollectionStore';
+import { MongoClientClosedError } from '../../errors.js';
 
 export class S3Store {
   private bucket: string;
@@ -11,7 +12,7 @@ export class S3Store {
   }
 
   collection(name: string): CollectionStore {
-    if (this.closed) throw new Error('Store is closed');
+    if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (!this.stores[name]) {
       this.stores[name] = new S3CollectionStore(name, this.bucket);
     }

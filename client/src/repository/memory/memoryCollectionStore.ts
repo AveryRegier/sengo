@@ -1,11 +1,9 @@
-
-
-
 import type { CollectionStore } from '../index';
 import { notImplementedMongo } from '../../utils';
 import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
+import { MongoClientClosedError } from '../../errors.js';
 export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
   // Inherits removeDocument from BaseCollectionIndex
 
@@ -39,7 +37,7 @@ export class MemoryCollectionStore implements CollectionStore {
   }
 
   private checkClosure() {
-    if (this.closed) throw new Error('Store is closed');
+    if (this.closed) throw new MongoClientClosedError('Store is closed');
   }
 
   find(query: Record<string, any>) {
