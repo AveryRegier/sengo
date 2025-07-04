@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { SengoClient } from '../src/client/client';
+import { SengoClient } from '../../src';
 import Chance from 'chance';
 
 describe('SengoClient Integration (Memory)', () => {

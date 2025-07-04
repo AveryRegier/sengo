@@ -19,3 +19,4 @@ Commit messages and documentation and examples should be in English, and should 
 If exporting from a directory, all exports are to be in the index.ts file so that import from './repository' works. I want to avoid using .js in imports because that messes up running tests before transpilation. the tools need to work together. ESM export issues should be handled in the build.
 Client exports are available in common-js format and in ESM format, and should be imported using the appropriate format.
 Documentation: Use JSDoc style comments for all public methods and classes, and write documentation in Markdown format.
+Source files go in /src, test files go in /test, Build files go in /build and distribution files go to /dist, documentation files go to /directories

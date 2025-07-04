@@ -9,6 +9,6 @@
     "strict": true,
     "outDir": "./build"
   },
-  "include": ["client/src/**/*", "shell/src/**/*"],
+  "include": ["client/src/**/*", "shell/src/**/*", "client/tests/client/cursor.test.ts"],
   "exclude": ["**/*.test.ts", "**/*.spec.ts", "tests/**/*"]
 }
