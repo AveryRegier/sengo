@@ -16,7 +16,7 @@ describe('SengoClient updateOne API (memory backend)', () => {
     const updateResult = await collection.updateOne({ _id: insertedId }, { $set: { name: 'UpdatedName' } });
     expect(updateResult).toHaveProperty('matchedCount', 1);
     expect(updateResult).toHaveProperty('modifiedCount', 1);
-    const found = await collection.find({ _id: insertedId });
+    const found = await collection.find({ _id: insertedId }).toArray();
     expect(found[0].name).toBe('UpdatedName');
   });
 });
@@ -44,14 +44,14 @@ describe('SengoClient updateOne API (s3 backend)', () => {
   });
   it('should update a document by _id', async () => {
     const client = new SengoClient('s3');
-    const collection = client.db().collection('animals');
+    const collection = client.db().collection<{ _id: string; name: string; kind: string }>('animals');
     const animal = { name: chance.first(), kind: chance.animal() };
     // Use a fixed _id for mock matching
     const { insertedId } = await collection.insertOne({ ...animal, _id: 'mockid' });
     const updateResult = await collection.updateOne({ _id: 'mockid' }, { $set: { name: 'UpdatedName' } });
     expect(updateResult).toHaveProperty('matchedCount', 1);
     expect(updateResult).toHaveProperty('modifiedCount', 1);
-    const found = await collection.find({ _id: 'mockid' });
+    const found = await collection.find({ _id: 'mockid' }).toArray();
     expect(found[0].name).toBe('UpdatedName');
   });
 });

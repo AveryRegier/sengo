@@ -9,14 +9,15 @@ export class SengoClient {
   }
 
   db(dbName?: string) {
+    const self = this;
     return {
-      collection: (name: string) => new SengoCollection(name, this.dbStore.collection(name))
+      collection<T>(name: string): SengoCollection<T> {
+        return new SengoCollection<T>(name, self.dbStore.collection<T>(name));
+      }
     };
   }
 
   async close() {
-    if (typeof (this.dbStore as any).close === 'function') {
-      await (this.dbStore as any).close();
-    }
+    await this.dbStore.close();
   }
 }

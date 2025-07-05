@@ -19,7 +19,7 @@ describe('SengoClient basic API', () => {
     const collection = client.db().collection('animals');
     const animal = { name: chance.first(), kind: chance.animal() };
     const insertResult = await collection.insertOne(animal);
-    const found = await collection.find({ _id: insertResult.insertedId });
+    const found = await collection.find({ _id: insertResult.insertedId }).toArray();
     expect(Array.isArray(found)).toBe(true);
     expect(found.length).toBe(1);
     expect(found[0]).toMatchObject({ _id: insertResult.insertedId, ...animal });

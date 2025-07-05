@@ -3,10 +3,10 @@ import { MemoryCollectionStore } from './memoryCollectionStore';
 import { MongoClientClosedError } from '../../errors.js';
 
 export class MemoryStore implements DbStore {
-  private stores: Record<string, MemoryCollectionStore> = {};
+  private stores: Record<string, MemoryCollectionStore<any>> = {};
   private closed = false;
 
-  collection(name: string): CollectionStore {
+  collection<T>(name: string): CollectionStore<T> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (!this.stores[name]) {
       this.stores[name] = new MemoryCollectionStore(name);

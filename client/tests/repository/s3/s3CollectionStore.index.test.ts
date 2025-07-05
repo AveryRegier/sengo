@@ -68,7 +68,7 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
     await sengoCollection.insertOne({ _id: 'c', foo: 1 as 1 });
     // Should still find docs with foo: 1, but not via index (simulate by clearing logs)
     s3sim.clearAccessLog();
-    const found = await sengoCollection.find({ foo: 1 });
+    const found = await sengoCollection.find({ foo: 1 }).toArray();
     // Should find both 'a' and 'c' (since index is gone, fallback to scan)
     const foundIds = found.map((d: any) => d._id).sort();
     expect(foundIds).toEqual(expect.arrayContaining(['a', 'c']));
@@ -226,7 +226,7 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
     let { store, sendMock } = makeStoreWithSim(s3sim);
     sengoCollection = new SengoCollection(collection, store);
     // Run the test
-    const foundAfterRestart = await sengoCollection.find({ foo: 1 });
+    const foundAfterRestart = await sengoCollection.find({ foo: 1 }).toArray();
     // Debug output
     // eslint-disable-next-line no-console
     console.log(`[sim ${s3sim._debugHash}] DEBUG foundAfterRestart:`, foundAfterRestart);
@@ -258,14 +258,14 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
       await index.flush();
     }
     // Find using the index (setup phase)
-    await sengoCollection.find({ foo: 1 });
+    await sengoCollection.find({ foo: 1 }).toArray();
     // Clear logs after setup
     s3sim.clearAccessLog();
     // Now use a new store/log for the actual test
     let { store, sendMock } = makeStoreWithSim(s3sim);
     sengoCollection = new SengoCollection(collection, store);
     // Run the test
-    const found = await sengoCollection.find({ foo: 1 });
+    const found = await sengoCollection.find({ foo: 1 }).toArray();
     const indexLog1 = s3sim.getIndexAccessLog();
     const expectedIndexFile = `${collection}/indices/${indexName}/${makeIndexKey({ foo: 1 })}.json`;
     expect(indexLog1).toEqual(expect.arrayContaining([expectedIndexFile]));
@@ -273,7 +273,7 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
     ({ store, sendMock } = makeStoreWithSim(s3sim));
     sengoCollection = new SengoCollection(collection, store);
     // Run the test again
-    const found2 = await sengoCollection.find({ foo: 1 });
+    const found2 = await sengoCollection.find({ foo: 1 }).toArray();
     const indexLog2 = s3sim.getIndexAccessLog();
     if (!indexLog2.includes(expectedIndexFile)) {
       // Debug output
@@ -301,14 +301,14 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
       await index.flush();
     }
     // Find using the index (setup phase)
-    await sengoCollection.find({ foo: 1 });
+    await sengoCollection.find({ foo: 1 }).toArray();
     // Clear logs after setup
     s3sim.clearAccessLog();
     // Now use a new store/log for the actual test
     let { store, sendMock } = makeStoreWithSim(s3sim);
     sengoCollection = new SengoCollection(collection, store);
     // Run the test
-    await sengoCollection.find({ foo: 1 });
+    await sengoCollection.find({ foo: 1 }).toArray();
     const indexLog1 = s3sim.getIndexAccessLog();
     const expectedIndexFile = `${collection}/indices/${indexName}/${makeIndexKey({ foo: 1 })}.json`;
     expect(indexLog1).toEqual(expect.arrayContaining([expectedIndexFile]));
@@ -332,14 +332,14 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
       await index.flush();
     }
     // Find using the index (setup phase)
-    await sengoCollection.find({ foo: 1 });
+    await sengoCollection.find({ foo: 1 }).toArray();
     // Clear logs after setup
     s3sim.clearAccessLog();
     // Now use a new store/log for the actual test
     let { store, sendMock } = makeStoreWithSim(s3sim);
     sengoCollection = new SengoCollection(collection, store);
     // Run the test and validate the document is found before checking logs
-    const foundDocs = await sengoCollection.find({ foo: 1 });
+    const foundDocs = await sengoCollection.find({ foo: 1 }).toArray();
     expect(foundDocs.length).toBeGreaterThan(0);
     const indexLog1 = s3sim.getIndexAccessLog();
     const docLog1 = s3sim.getDocumentAccessLog();
@@ -354,14 +354,14 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
     expect(indexLog2).toEqual(expect.arrayContaining([expectedIndexEntryFile]));
     // Do NOT check docLog after restart, as doc file may be cached or not re-fetched
     // Third find with a different key: should load a different index entry file
-    await sengoCollection.find({ foo: 2 });
+    await sengoCollection.find({ foo: 2 }).toArray();
     const indexLog3 = s3sim.getIndexAccessLog();
     const expectedIndexEntryFile2 = `${collection}/indices/${indexName}/${makeIndexKey({ foo: 2 })}.json`;
     expect(indexLog3).toEqual(expect.arrayContaining([expectedIndexEntryFile2]));
     // And only once for that key
     ({ store, sendMock } = makeStoreWithSim(s3sim));
     sengoCollection = new SengoCollection(collection, store);
-    await sengoCollection.find({ foo: 2 });
+    await sengoCollection.find({ foo: 2 }).toArray();
     const indexLog4 = s3sim.getIndexAccessLog();
     expect(indexLog4.length).toBeGreaterThanOrEqual(0);
   });

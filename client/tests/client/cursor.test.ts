@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Cursor } from '../../src/client/cursor';
+import { ConsumingArrayCursor, Cursor } from '../../src/client/findCursor';
 
 describe('Cursor', () => {
   const docs = [
@@ -9,7 +9,7 @@ describe('Cursor', () => {
   ];
 
   it('returns documents in order with next()', async () => {
-    const cursor = new Cursor(docs);
+    const cursor = new ConsumingArrayCursor([...docs]);
     expect(await cursor.next()).toEqual(docs[0]);
     expect(await cursor.next()).toEqual(docs[1]);
     expect(await cursor.next()).toEqual(docs[2]);
@@ -17,31 +17,31 @@ describe('Cursor', () => {
   });
 
   it('toArray() returns all remaining documents', async () => {
-    const cursor = new Cursor(docs);
+    const cursor = new ConsumingArrayCursor([...docs]);
     await cursor.next(); // consume one
     expect(await cursor.toArray()).toEqual([docs[1], docs[2]]);
     expect(await cursor.next()).toBeNull();
   });
 
   it('hasNext() is true when there are more docs', async () => {
-    const cursor = new Cursor(docs);
-    expect(cursor.hasNext()).toBe(true);
+    const cursor = new ConsumingArrayCursor([...docs]);
+    expect(await cursor.hasNext()).toBe(true);
     await cursor.next();
     await cursor.next();
-    expect(cursor.hasNext()).toBe(true);
+    expect(await cursor.hasNext()).toBe(true);
     await cursor.next();
-    expect(cursor.hasNext()).toBe(false);
+    expect(await cursor.hasNext()).toBe(false);
   });
 
   it('close() prevents further access', async () => {
-    const cursor = new Cursor(docs);
+    const cursor = new ConsumingArrayCursor([...docs]);
     await cursor.close();
     await expect(cursor.next()).rejects.toThrow('Cursor is closed');
     await expect(cursor.toArray()).rejects.toThrow('Cursor is closed');
   });
 
   it('supports async iteration', async () => {
-    const cursor = new Cursor(docs);
+    const cursor = new ConsumingArrayCursor([...docs]);
     const seen: any[] = [];
     for await (const doc of cursor) {
       seen.push(doc);

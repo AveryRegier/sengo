@@ -273,9 +273,19 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param key Index key
    */
   async findIdsForKey(key: string): Promise<string[]> {
-    const entry = await this.getIndexEntryForKey(key);
-    console.log(`[S3CollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
-    return entry.toArray();
+    try {
+      const entry = await this.getIndexEntryForKey(key);
+      console.log(`[S3CollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
+      return entry.toArray();
+    } catch (err: any) {
+      if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
+        throw new MongoNetworkError(err.message || 'Network error');
+      }
+      if (typeof err === 'string') {
+        throw new MongoNetworkError(err);
+      }
+      throw err;
+    }
   }
 
   /**
@@ -290,21 +300,23 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * Fetches from S3 if entry is not in memory, merges IDs, and persists if needed.
    * @param doc Document to add
    */
-  async addDocument(doc: Record<string, any>): Promise<void> {
-    console.log(`[S3CollectionIndex] addDocument: Adding doc with _id=${doc._id}`);
-    const key = this.makeIndexKey(doc);
-    let entry = this.indexMap.get(key);
-    if (!entry) {
-      // Fetch from S3 here to merge with any existing entry
-      entry = await this.fetch(key);
-      this.indexMap.set(key, entry);
-      console.log(`[S3CollectionIndex] addDocument: Created new index entry for key='${key}'`);
-    }
-    if (entry.add(doc._id)) {
-      console.log(`[S3CollectionIndex] addDocument: Index entry for key='${key}' marked dirty, persisting...`);
-      await this.persist(key, entry);
-    } else {
-      console.log(`[S3CollectionIndex] addDocument: Index entry for key='${key}' already contains _id=${doc._id}`);
+  async addDocument(doc: Record<string, any>): Promise<void> { 
+    if(this.hasFirstKey(doc)) {
+      console.log(`[S3CollectionIndex] addDocument: Adding doc with _id=${doc._id}`);
+      const key = this.makeIndexKey(doc);
+      let entry = this.indexMap.get(key);
+      if (!entry) {
+        // Fetch from S3 here to merge with any existing entry
+        entry = await this.fetch(key);
+        this.indexMap.set(key, entry);
+        console.log(`[S3CollectionIndex] addDocument: Created new index entry for key='${key}'`);
+      }
+      if (entry.add(doc._id)) {
+        console.log(`[S3CollectionIndex] addDocument: Index entry for key='${key}' marked dirty, persisting...`);
+        await this.persist(key, entry);
+      } else {
+        console.log(`[S3CollectionIndex] addDocument: Index entry for key='${key}' already contains _id=${doc._id}`);
+      }
     }
   }
 

@@ -4,7 +4,7 @@ import { MemoryCollectionStore } from '../../../src/repository/memory/memoryColl
 
 
 describe('MemoryCollectionStore', () => {
-  let store: MemoryCollectionStore;
+  let store: MemoryCollectionStore<any>;
   const collection = 'test-collection';
 
   beforeEach(() => {
@@ -71,12 +71,12 @@ describe('MemoryCollectionStore', () => {
     const doc = { _id: 'del1', foo: 123 };
     await store.replaceOne({ _id: doc._id }, doc);
     // Confirm present
-    let found = store.find({ _id: doc._id });
+    let found = await store.find({ _id: doc._id }).toArray();
     expect(found.length).toBe(1);
     // Delete
     await store.deleteOneById(doc._id);
     // Should be gone
-    found = store.find({ _id: doc._id });
+    found = await store.find({ _id: doc._id }).toArray();
     expect(found.length).toBe(0);
   });
 });

@@ -1,9 +1,11 @@
 import type { CollectionStore } from '../index';
-import { notImplementedMongo } from '../../utils';
 import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
 import { MongoClientClosedError } from '../../errors.js';
+import { ConsumingArrayCursor, FindCursor } from '../../client/findCursor';
+import { WithId } from '../../types';
+
 export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
   // Inherits removeDocument from BaseCollectionIndex
 
@@ -18,14 +20,14 @@ export class MemoryCollectionIndex extends BaseCollectionIndex implements Collec
   }
 }
 
-export class MemoryCollectionStore implements CollectionStore {
-
+export class MemoryCollectionStore<T> implements CollectionStore<T> {
   // Expose last created index for testing
   public lastIndexInstance?: MemoryCollectionIndex;
-  private documents: Record<string, any>[] = [];
+  private documents: (WithId<T> & { [key: string]: any })[] = [];
   name: string;
   private closed = false;
   private indexes: Map<string, MemoryCollectionIndex> = new Map();
+
   constructor(name?: string) {
     this.name = name || '';
   }
@@ -40,11 +42,13 @@ export class MemoryCollectionStore implements CollectionStore {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
   }
 
-  find(query: Record<string, any>) {
+  find(query: Record<string, any>): FindCursor<WithId<T>> {
     this.checkClosure();
-    return this.documents.filter(doc => {
+    const results = this.documents.filter(doc => {
       return Object.entries(query).every(([k, v]) => doc[k]?.toString() === v?.toString());
     });
+
+    return new ConsumingArrayCursor<WithId<T>>(results) as unknown as FindCursor<WithId<T>>;
   }
 
   updateOne(filter: Record<string, any>, doc: Record<string, any>) {
@@ -52,16 +56,16 @@ export class MemoryCollectionStore implements CollectionStore {
     // Only support update by _id for now
     const idx = this.documents.findIndex(d => d._id?.toString() === filter._id?.toString());
     if (idx === -1) return { matchedCount: 0, modifiedCount: 0 };
-    this.documents[idx] = { ...doc };
+    this.documents[idx] = { ...doc } as WithId<T> & { [key: string]: any };
     return { matchedCount: 1, modifiedCount: 1 };
   }
 
   async replaceOne(filter: Record<string, any>, doc: Record<string, any>) {
     const idx = this.documents.findIndex(d => d._id === (filter._id ?? doc._id));
     if (idx !== -1) {
-      this.documents[idx] = { ...doc };
+      this.documents[idx] = { ...doc } as WithId<T> & { [key: string]: any };
     } else {
-      this.documents.push({ ...doc });
+      this.documents.push({ ...doc } as WithId<T> & { [key: string]: any });
     }
     return Promise.resolve();
   }

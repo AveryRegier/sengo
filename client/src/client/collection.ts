@@ -1,15 +1,15 @@
 import { MongoClientClosedError, MongoServerError } from '../errors.js';
 import { CollectionIndex, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
-import { IndexDefinition } from '../types';
+import { IndexDefinition, WithId } from '../types';
+import { FindCursor } from './findCursor.js';
 
-export class SengoCollection {
+export class SengoCollection<T> {
   name: string;
-  store: CollectionStore;
-  static collections: Record<string, SengoCollection> = {};
+  store: CollectionStore<T>;
   private _indexes: Record<string, CollectionIndex> = {};
 
-  constructor(name: string, store: CollectionStore) {
+  constructor(name: string, store: CollectionStore<T>) {
     this.name = name;
     this.store = store;
   }
@@ -25,7 +25,7 @@ export class SengoCollection {
 
   async insertOne(doc: Record<string, any>) {
     // Check for closed store (if supported)
-    if (typeof (this.store as any).isClosed === 'function' && (this.store as any).isClosed()) {
+    if (this.store.isClosed()) {
       throw new MongoClientClosedError('Store is closed');
     }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
@@ -37,20 +37,20 @@ export class SengoCollection {
       // Only call updateIndexOnDocumentUpdate, which is the public API
       console.log(`[SengoCollection.insertOne] Adding doc to index '${indexName}':`, JSON.stringify(docWithId));
       // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
-      await index.updateIndexOnDocumentUpdate({}, docWithId);
+      await index.addDocument(docWithId);
     }
     return { acknowledged: true, insertedId: docWithId._id };
   }
 
-  async find(query: Record<string, any>) {
+  find(query: Record<string, any>): FindCursor<WithId<T>> {
     const result = this.store.find(query);
-    console.log('[SengoCollection.find] Query:', JSON.stringify(query), 'Result:', JSON.stringify(result));
+    //console.log('[SengoCollection.find] Query:', JSON.stringify(query), 'Result:', JSON.stringify(result.toArray));
     return result;
   }
 
   async updateOne(filter: Record<string, any>, update: Record<string, any>) {
     // Find the first matching document
-    const docs = await this.find(filter);
+    const docs = await this.find(filter).toArray();
     if (!docs.length) {
       return { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
     }
@@ -73,9 +73,7 @@ export class SengoCollection {
     // Index maintenance: let each index handle the update logic
     for (const indexName in this._indexes) {
       const index = this._indexes[indexName];
-      if (typeof index.updateIndexOnDocumentUpdate === 'function') {
-        await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
-      }
+      await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
     }
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
   }
@@ -85,12 +83,11 @@ export class SengoCollection {
    */
   async deleteOne(filter: Record<string, any>) {
     // Find the first matching document
-    const found = await this.find(filter);
-    if (!found || found.length === 0) {
+    const found = await this.find(filter).next();
+    if (!found) {
       return { deletedCount: 0 };
     }
-    const doc = found[0];
-    const docId = doc._id;
+    const docId = found._id;
     // Call the store to delete by _id
     await this.store.deleteOneById(docId);
     // Remove from indexes if needed (index maintenance handled in store or here as needed)
@@ -106,16 +103,13 @@ export class SengoCollection {
     // Build the index here (assume contract is always fulfilled)
     console.log(`[SengoCollection] Calling this.store.find({}) after index creation for index '${fields || 'default_index'}'`);
     const allDocs = await this.store.find({});
-    console.log(`[SengoCollection] this.store.find({}) returned ${allDocs.length} documents`);
-    for (let i = 0; i < allDocs.length; i++) {
-      const doc = allDocs[i];
-      // If this is the last document and the index has a flush method, call flush after addDocument
-      if (i === allDocs.length - 1 && typeof (index as any).flush === 'function') {
-        await (index as any).addDocument(doc);
-        await (index as any).flush();
-      } else {
-        await (index as any).addDocument(doc);
-      }
+    if(await allDocs.hasNext()) { 
+      do  {
+        const doc = await allDocs.next();
+        if(doc) await index.addDocument(doc);
+      } while(await allDocs.hasNext());
+      // If this is the last document, flush
+      await index.flush();
     }
     // Track the index for future maintenance
     this._indexes[fields || 'default_index'] = index;

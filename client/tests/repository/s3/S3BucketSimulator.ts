@@ -126,7 +126,7 @@ export class S3BucketSimulator {
     // Log all index/document file reads
     if (key.includes('/indices/')) {
       this.indexAccessLog.push(key);
-    } else if (key.includes('/documents/')) {
+    } else if (key.includes('/data/')) {
       this.documentAccessLog.push(key);
     }
     // For backward compatibility

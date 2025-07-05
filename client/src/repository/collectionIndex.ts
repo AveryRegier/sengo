@@ -5,6 +5,8 @@ import { NormalizedIndexKeyRecord } from ".";
 export interface CollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
+  
+  addDocument(doc: Record<string, any>): Promise<void>;
   /**
    * Update the index for a document update. Receives the old and new document.
    * The index implementation should decide if any index maintenance is needed.
@@ -13,6 +15,7 @@ export interface CollectionIndex {
   updateIndexOnDocumentUpdate(oldDoc: Record<string, any>, newDoc: Record<string, any>): Promise<void>;
   isBusy?(): boolean;
   getStatus?(): { pendingInserts: number; runningTasks: number; avgPersistMs: number; estTimeToClearMs: number };
+  flush(): Promise<void>;
 }
 
 export class IndexEntry {
@@ -65,9 +68,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
       await this.removeDocument(oldDoc);
     }
     await this.addDocument(newDoc);
-    if (typeof (this.flush) === 'function') {
-      await this.flush();
-    }
+    await this.flush();
   }
 
   /**
@@ -87,13 +88,15 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
 
   public async addDocument(doc: Record<string, any>): Promise<void> {
     if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
-    const key = this.makeIndexKey(doc);
-    let entry = this.indexMap.get(key);
-    if (!entry) {
-      entry = await this.fetch(key);
-      this.indexMap.set(key, entry);
+    if(this.hasFirstKey(doc)) {
+      const key = this.makeIndexKey(doc);
+      let entry = this.indexMap.get(key);
+      if (!entry) {
+        entry = await this.fetch(key);
+        this.indexMap.set(key, entry);
+      }
+      entry.add(doc._id.toString());
     }
-    entry.add(doc._id.toString());
   }
 
   public makeIndexKey(doc: Record<string, any>): string {
@@ -134,26 +137,33 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     // In-memory: always return empty
     return new IndexEntry();
   }
+
+  protected hasFirstKey(doc: Record<string, any>): boolean {
+    const value = doc[this.keys[0]?.field];
+    return value !== undefined && value !== null && value !== '';
+  }
 }
 
 export function normalizeIndexKeys(keys: IndexDefinition | IndexDefinition[]): NormalizedIndexKeyRecord[] {
-    if (!keys) {
-      throw new MongoInvalidArgumentError('Keys must be defined for creating an index');
-    }
-    let keysArray: IndexDefinition[];
-    if (!Array.isArray(keys)) {
-      keysArray = [keys];
-    } else {
-      keysArray = keys;
-    }
-    const normalizedKeys = keysArray.map((key) => {
-      if (typeof key === 'string') {
-        return [{ field: key, order: 1 as Order }];
-      } else if (typeof key === 'object') {
-        return Object.entries(key as IndexKeyRecord).map(([field, order]) => ({ field, order }));
-      } else {
-        throw new MongoInvalidArgumentError('Invalid index key format');
-      }
-    }).flat();
-    return normalizedKeys;
+  if (!keys) {
+    throw new MongoInvalidArgumentError('Keys must be defined for creating an index');
   }
+  let keysArray: IndexDefinition[];
+  if (!Array.isArray(keys)) {
+    keysArray = [keys];
+  } else {
+    keysArray = keys;
+  }
+  const normalizedKeys = keysArray.map((key) => {
+    if (typeof key === 'string') {
+      return [{ field: key, order: 1 as Order }];
+    } else if (typeof key === 'object') {
+      return Object.entries(key as IndexKeyRecord).map(([field, order]) => ({ field, order }));
+    } else {
+      throw new MongoInvalidArgumentError('Invalid index key format');
+    }
+  }).flat();
+  return normalizedKeys;
+}
+
+

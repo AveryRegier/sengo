@@ -2,12 +2,21 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { SengoClient } from '../../src/client/client';
 import Chance from 'chance';
 import { SengoCollection } from '../../src/client/collection';
+import { WithId } from '../../src/types';
+
+type TestDoc = {
+  name: string;
+  age: number;
+  email: string;
+  city: string;
+  random: string;
+};
 
 describe('SengoCollection createIndex and find (Memory)', () => {
   const chance = new Chance();
   let client: SengoClient;
-  let collection: SengoCollection;
-  let docs: Record<string, any>[];
+  let collection: SengoCollection<TestDoc>;
+  let docs: WithId<TestDoc>[];
 
   const docCreator = () => ({
     name: chance.name(),
@@ -20,7 +29,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
   beforeEach(async () => {
     client = new SengoClient('memory');
     const collectionName = 'col_' + chance.hash({ length: 8 });
-    collection = client.db().collection(collectionName);
+    collection = client.db().collection<TestDoc>(collectionName);
     // Create and insert docs, capturing their _id
     docs = [];
     for (let i = 0; i < 3; i++) {
@@ -47,7 +56,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
 
     // Find a subset using the indexed field
     const subsetValue = docs[0][indexField];
-    const subsetFound = await collection.find({ [indexField]: subsetValue });
+    const subsetFound = await collection.find({ [indexField]: subsetValue }).toArray();
     // Should find at least one (the doc with that value)
     expect(subsetFound.length).toBeGreaterThanOrEqual(1);
     expect(subsetFound.some(d => d.email === docs[0].email)).toBe(true);
@@ -65,7 +74,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     }  
 
     // Find all docs (should get all 8)
-    const found = await collection.find({});
+    const found = await collection.find({}).toArray();
     expect(found.length).toBe(6);
     // All docs should be present
     const allDocs = [...docs, ...moreDocs];
@@ -124,14 +133,14 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     const insertResult = await collection.insertOne(doc);
     const docId = insertResult.insertedId;
     // Should be found before deletion
-    let found = await collection.find({ _id: docId });
+    let found = await collection.find({ _id: docId }).toArray();
     expect(found.length).toBe(1);
     expect(found[0]._id.toString()).toBe(docId.toString());
     // Delete the document
     const result = await collection.deleteOne({ _id: docId });
     expect(result).toEqual({ deletedCount: 1 });
     // Should not be found after deletion
-    found = await collection.find({ _id: docId });
+    found = await collection.find({ _id: docId }).toArray();
     expect(found.length).toBe(0);
     // _id should be removed from all indexes
     if ((collection.store as any).lastIndexInstance) {
@@ -154,7 +163,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     const result = await collection.deleteOne({ foo: 'X' });
     expect(result).toEqual({ deletedCount: 1 });
     // Only one should be deleted
-    let found = await collection.find({ foo: 'X' });
+    let found = await collection.find({ foo: 'X' }).toArray();
     expect(found.length).toBe(1);
     // The remaining doc should be one of the two
     expect([
@@ -178,14 +187,14 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     const insertResult = await collection.insertOne(doc);
     const docWithId = { ...doc, _id: insertResult.insertedId };
     // Should be found before deletion
-    let found = await collection.find({ email: doc.email });
+    let found = await collection.find({ email: doc.email }).toArray();
     expect(found.length).toBe(1);
     expect(found[0]._id.toString()).toBe(docWithId._id.toString());
     // Delete by email
     const result = await collection.deleteOne({ email: doc.email });
     expect(result).toEqual({ deletedCount: 1 });
     // Should not be found after deletion
-    found = await collection.find({ email: doc.email });
+    found = await collection.find({ email: doc.email }).toArray();
     expect(found.length).toBe(0);
     // _id should be removed from all indexes
     if ((collection.store as any).lastIndexInstance) {

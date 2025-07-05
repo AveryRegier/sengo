@@ -8,9 +8,12 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   ListObjectsV2Command,
-  DeleteObjectCommand
+  DeleteObjectCommand,
+  GetObjectCommandOutput
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
+import { FindCursor } from '../../client/findCursor.js';
+import { WithId } from '../../types.js';
 
 export interface S3CollectionStoreOptions {
   region?: string;
@@ -21,7 +24,7 @@ export interface S3CollectionStoreOptions {
   };
 }
 
-export class S3CollectionStore implements CollectionStore {
+export class S3CollectionStore<T> implements CollectionStore<T> {
   private s3: S3Client;
   private bucket: string;
   private collection: string;
@@ -98,7 +101,7 @@ export class S3CollectionStore implements CollectionStore {
   async deleteOneById(id: any): Promise<void> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (!id) throw new MongoInvalidArgumentError('deleteOneById requires id');
-    const key = `${this.collection}/data/${id}.json`;
+    const key = this.id2key(id);
     await this.s3.send(new DeleteObjectCommand({
       Bucket: this.bucket,
       Key: key,
@@ -108,6 +111,10 @@ export class S3CollectionStore implements CollectionStore {
     for (const index of this.loadedIndexes.values()) {
       await index.removeIdFromAllKeys(id);
     }
+  }
+
+  private id2key(id: any) {
+    return `${this.collection}/data/${id}.json`;
   }
 
   /**
@@ -138,104 +145,85 @@ export class S3CollectionStore implements CollectionStore {
     return bestIndex;
   }
 
-  async find(query: Record<string, any>) {
+  find(query: Record<string, any>): FindCursor<WithId<T>> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
+    // Return a FindCursor that will fetch the results lazily
+    return new S3FindCursor<WithId<T>>(() => this.findFilterSort(query));
+  }
+
+  private async findFilterSort(query: Record<string, any>): Promise<WithId<T>[]> {
+    return this.findCandidates(query).then(async results => {
+      return results.filter(parsed => {
+        if (parsed && typeof parsed === 'object' && (parsed as any)._id !== undefined) {
+          if (Object.entries(query).every(([k, v]) => (parsed as Record<string, any>)[k]?.toString() === v?.toString())) {
+            return true;
+          }
+        }
+        return false;
+      });
+    });
+  }
+
+  private async findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
+    if (this.closed) throw new MongoClientClosedError('Store is closed');
+    if (query._id) {
+      const doc = await this.loadById(query._id);
+      return doc ? [doc] : [];
+    }
     await this.ensureIndexesLoaded();
-    // Select the best matching index (first key must match)
     const index = this.findBestIndex(query);
     if (index) {
-      // Use the index's key generation to build the correct key for the query
       const key = (typeof (index as any).getIndexKeyForQuery === 'function')
         ? (index as any).getIndexKeyForQuery(query)
         : (index as any).makeIndexKey(query);
-      let ids: string[] = [];
-      try {
-        ids = await index.findIdsForKey(key);
-      } catch (err: any) {
-        if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-          throw new MongoNetworkError(err.message || 'Network error');
-        }
-        if (typeof err === 'string') {
-          throw new MongoNetworkError(err);
-        }
-        throw err;
-      }
-      const docs: any[] = [];
-      for (const id of ids) {
-        const docKey = `${this.collection}/data/${id}.json`;
-        try {
-          const result = await this.s3.send(new GetObjectCommand({
-            Bucket: this.bucket,
-            Key: docKey,
-          }));
-          if (!result || !result.Body) throw Object.assign(new MongoServerError('Not found'), { name: 'NoSuchKey' });
-          const stream = result.Body as Readable;
-          const data = await new Promise<string>((resolve, reject) => {
-            let str = '';
-            stream.on('data', chunk => (str += chunk));
-            stream.on('end', () => resolve(str));
-            stream.on('error', reject);
-          });
-          docs.push(JSON.parse(data));
-        } catch (err: any) {
-          if (err.name === 'NoSuchKey') continue;
-          if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-            throw new MongoNetworkError(err.message || 'Network error');
-          }
-          // If the error is a string (e.g., 'connect ETIMEDOUT'), wrap it as an Error object
-          if (typeof err === 'string') {
-            throw new MongoNetworkError(err);
-          }
-          if (err && typeof err.message === 'string' && /etimedout|network|timeout|econnrefused/i.test(err.message)) {
-            throw new MongoNetworkError(err.message || 'Network error');
-          }
-          if (err && typeof err.toString === 'function' && /etimedout|network|timeout|econnrefused/i.test(err.toString())) {
-            throw new MongoNetworkError(err.message || 'Network error');
-          }
-          throw err;
-        }
-      }
-      return docs;
+      const keys = (await index.findIdsForKey(key)).map(this.id2key.bind(this));
+      return await this.loadTheseDocuments<T>(keys);
     }
-    // Fallback: Only supports find by _id for now
-    if (query._id) {
-      const key = `${this.collection}/data/${query._id}.json`;
-      try {
-        const result = await this.s3.send(new GetObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-        }));
-        if (!result || !result.Body) throw Object.assign(new MongoServerError('Not found'), { name: 'NoSuchKey' });
-        const stream = result.Body as Readable;
-        const data = await new Promise<string>((resolve, reject) => {
-          let str = '';
-          stream.on('data', chunk => (str += chunk));
-          stream.on('end', () => resolve(str));
-          stream.on('error', reject);
-        });
-        return [JSON.parse(data)];
-      } catch (err: any) {
-        // Debug logging for test failure analysis
-        // eslint-disable-next-line no-console
-        console.error('[S3CollectionStore.find] Caught error for _id query:', err, 'name:', err?.name, 'message:', err?.message, 'stack:', err?.stack);
-        if (err.name === 'NoSuchKey') return [];
-        if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-          throw new MongoNetworkError(err.message || 'Network error');
-        }
-        // If the error is a string (e.g., 'connect ETIMEDOUT'), wrap it as an Error object
-        if (typeof err === 'string') {
-          throw new MongoNetworkError(err);
-        }
-        if (err && typeof err.message === 'string' && /etimedout|network|timeout|econnrefused/i.test(err.message)) {
-          throw new MongoNetworkError(err.message || 'Network error');
-        }
-        if (err && typeof err.toString === 'function' && /etimedout|network|timeout|econnrefused/i.test(err.toString())) {
-          throw new MongoNetworkError(err.message || 'Network error');
-        }
-        throw err;
-      }
+    return this.scan(query);
+  }
+
+  private async loadById(_id: any): Promise<WithId<T> | null> {
+    const key = this.id2key(_id);
+    try {
+      const record = await this.loadRecordByKey(key);
+      return record;
+    } catch (err: any) {
+      if (err.name === 'NoSuchKey') return null; // Not found
+      throw err; // Re-throw other errors
     }
-    // Fallback: list all objects (inefficient, for demo only)
+  }
+
+  private async loadRecordByKey(key: string): Promise<WithId<T>> {
+    try {
+      const result = await this.s3.send(new GetObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      }));
+      if (!result || !result.Body) throw Object.assign(new MongoServerError('Not found'), { name: 'NoSuchKey' });
+      const data = await getBodyAsString(result);
+      return JSON.parse(data);
+    } catch (err: any) {
+      if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
+        throw new MongoNetworkError(err.message || 'Network error');
+      }
+      if (typeof err === 'string') {
+        throw new MongoNetworkError(err);
+      }
+      if (err && typeof err.message === 'string' && /etimedout|network|timeout|econnrefused/i.test(err.message)) {
+        throw new MongoNetworkError(err.message || 'Network error');
+      }
+      if (err && typeof err.toString === 'function' && /etimedout|network|timeout|econnrefused/i.test(err.toString())) {
+        throw new MongoNetworkError(err.message || 'Network error');
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Scan the S3 bucket for all objects in the collection and filter by query.
+   * This is a fallback if no index is available or the query cannot be satisfied by an index.
+   */
+  private async scan(query: Record<string, any>): Promise<WithId<T>[]> {
     const prefix = `${this.collection}/data/`;
     let listed;
     try {
@@ -251,45 +239,10 @@ export class S3CollectionStore implements CollectionStore {
       }
       throw err;
     }
-    const results: any[] = [];
-    for (const obj of listed.Contents) {
-      const key = obj.Key!;
-      try {
-        const result = await this.s3.send(new GetObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-        }));
-        if (!result || !result.Body) throw Object.assign(new Error('Not found'), { name: 'NoSuchKey' });
-        const stream = result.Body as Readable;
-        const data = await new Promise<string>((resolve, reject) => {
-          let str = '';
-          stream.on('data', chunk => (str += chunk));
-          stream.on('end', () => resolve(str));
-          stream.on('error', reject);
-        });
-        const parsed = JSON.parse(data);
-        // Only push if parsed is an object and has _id
-        if (parsed && typeof parsed === 'object' && parsed._id !== undefined) {
-          if (Object.entries(query).every(([k, v]) => parsed[k]?.toString() === v?.toString())) {
-            results.push(parsed);
-          }
-        }
-      } catch (err) {
-        // Skip this document if any error occurs (missing, invalid JSON, etc)
-        continue;
-      }
-    }
-    return results;
-  }
 
-  /**
-   * Helper to build an index by adding all current documents to it.
-   */
-  private async buildIndex(index: { addDocument: (doc: Record<string, any>) => Promise<void> }) {
-    const allDocs = await this.find({});
-    for (const doc of allDocs) {
-      await index.addDocument(doc);
-    }
+    const keys = listed.Contents.map(obj => obj.Key!);
+
+    return await this.loadTheseDocuments<T>(keys);
   }
 
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
@@ -308,7 +261,6 @@ export class S3CollectionStore implements CollectionStore {
       collectionName: this.collection,
       bucket: this.bucket,
     });
-    await this.buildIndex(s3Index);
     // Expose last created index instance for test synchronization
     (this as any).lastIndexInstance = s3Index;
     // Do not manually persist all index entries here
@@ -336,13 +288,7 @@ export class S3CollectionStore implements CollectionStore {
           Bucket: this.bucket,
           Key: key,
         }));
-        const stream = result.Body as Readable;
-        const data = await new Promise<string>((resolve, reject) => {
-          let str = '';
-          stream.on('data', chunk => (str += chunk));
-          stream.on('end', () => resolve(str));
-          stream.on('error', reject);
-        });
+        const data = await getBodyAsString(result);
         const meta = JSON.parse(data);
         const indexName = meta.name;
         const keys = meta.keys;
@@ -355,6 +301,12 @@ export class S3CollectionStore implements CollectionStore {
         }
       }
     }
+  }
+
+  private async loadTheseDocuments<T>(keys: string[]): Promise<WithId<T>[]> {
+    const docs = await Promise.all(keys.map(key => this.loadRecordByKey(key)));
+    // Filter out nulls (not found)
+    return docs.filter(doc => doc !== null) as WithId<T>[];
   }
 
   /**
@@ -374,5 +326,67 @@ export class MongoNetworkError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'MongoNetworkError';
+  }
+}
+
+async function getBodyAsString(result: GetObjectCommandOutput): Promise<string> {
+  const stream = result.Body as Readable;
+  const data = await new Promise<string>((resolve, reject) => {
+    let str = '';
+    stream.on('data', chunk => (str += chunk));
+    stream.on('end', () => resolve(str));
+    stream.on('error', reject);
+  });
+  return data;
+}
+
+
+class S3FindCursor<T> implements FindCursor<T> {
+  private _docs: WithId<T>[] | undefined;
+  private _index: number = 0;
+  private _closed: boolean = false;
+  private _loader: () => Promise<WithId<T>[]>;
+
+  constructor(loader: () => Promise<WithId<T>[]>) {
+    this._loader = loader;
+  }
+
+  private async ensureLoaded() {
+    if (!this._docs) {
+      this._docs = await this._loader();
+      this._index = 0;
+    }
+  }
+
+  public async next(): Promise<WithId<T> | null> {
+    await this.ensureLoaded();
+    if (this._docs && this._index < this._docs.length) {
+      return this._docs[this._index++];
+    }
+    return null;
+  }
+
+  public async toArray(): Promise<WithId<T>[]> {
+    await this.ensureLoaded();
+    if (!this._docs) return [];
+    const remaining = this._docs.slice(this._index);
+    this._index = this._docs.length;
+    return remaining;
+  }
+
+  public async close(): Promise<void> {
+    this._closed = true;
+  }
+
+  public async hasNext(): Promise<boolean> {
+    await this.ensureLoaded();
+    return !this._closed && !!this._docs && this._index < this._docs.length;
+  }
+
+  public async *[Symbol.asyncIterator](): AsyncGenerator<WithId<T>, void, unknown> {
+    let doc;
+    while ((doc = await this.next()) !== null) {
+      yield doc;
+    }
   }
 }

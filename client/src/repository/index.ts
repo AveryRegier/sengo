@@ -1,4 +1,5 @@
-import { Order } from '../types';
+import { FindCursor } from '../client/findCursor';
+import { Order, WithId } from '../types';
 import { CollectionIndex } from './collectionIndex';
 import { MemoryStore } from './memory/index';
 import { S3Store } from './s3/index';
@@ -12,20 +13,19 @@ export * from './collectionIndex';
 
 export type NormalizedIndexKeyRecord = { field: string, order: Order };
 
-export interface CollectionStore {
-  replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void>;
-  find(query: Record<string, any>): Promise<Record<string, any>[]> | Record<string, any>[];
+export interface CollectionStore<T> {
+  close(): Promise<void>;
   createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex>;
-  dropIndex(name: string): Promise<void>;
-  /**
-   * Delete a document by _id. Must be implemented by all stores.
-   */
   deleteOneById(id: any): Promise<void>;
+  dropIndex(name: string): Promise<void>;
+  find(query: Record<string, any>): FindCursor<WithId<T>>;
+  isClosed(): boolean;
+  replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void>;
 }
 
 
 export interface DbStore {
-  collection(name: string): CollectionStore;
+  collection<T>(name: string): CollectionStore<T>;
   close(): Promise<void>;
 }
 

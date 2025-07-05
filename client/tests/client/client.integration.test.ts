@@ -28,7 +28,7 @@ describe('SengoClient Integration (Memory)', () => {
     const insertResult = await collection.insertOne(doc);
     expect(insertResult.acknowledged).toBe(true);
     expect(insertResult.insertedId).toBeDefined();
-    const found = await collection.find({ _id: insertResult.insertedId });
+    const found = await collection.find({ _id: insertResult.insertedId }).toArray();
     expect(found.length).toBe(1);
     expect(found[0]).toMatchObject(doc);
     expect(found[0]._id).toBeDefined();
