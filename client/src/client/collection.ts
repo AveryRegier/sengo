@@ -1,8 +1,7 @@
 import { MongoClientClosedError, MongoServerError } from '../errors.js';
 import { CollectionIndex, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
-import { IndexDefinition, WithId } from '../types';
-import { FindCursor } from './findCursor.js';
+import { FindCursor, IndexDefinition, WithId } from '../types';
 
 export class SengoCollection<T> {
   name: string;

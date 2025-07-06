@@ -12,8 +12,7 @@ import {
   GetObjectCommandOutput
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
-import { FindCursor } from '../../client/findCursor.js';
-import { WithId } from '../../types.js';
+import { WithId, FindCursor } from '../../types.js';
 
 export interface S3CollectionStoreOptions {
   region?: string;
@@ -83,7 +82,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     const _id = filter._id ?? doc._id;
     if (!_id) throw new MongoInvalidArgumentError('replaceOne requires _id');
-    const key = `${this.collection}/data/${_id}.json`;
+    const key = this.id2key(_id);
     const body = JSON.stringify(doc);
     await this.s3.send(new PutObjectCommand({
       Bucket: this.bucket,
@@ -179,7 +178,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       const keys = (await index.findIdsForKey(key)).map(this.id2key.bind(this));
       return await this.loadTheseDocuments<T>(keys);
     }
-    return this.scan(query);
+    return this.scan();
   }
 
   private async loadById(_id: any): Promise<WithId<T> | null> {
@@ -223,7 +222,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
    * Scan the S3 bucket for all objects in the collection and filter by query.
    * This is a fallback if no index is available or the query cannot be satisfied by an index.
    */
-  private async scan(query: Record<string, any>): Promise<WithId<T>[]> {
+  private async scan(): Promise<WithId<T>[]> {
     const prefix = `${this.collection}/data/`;
     let listed;
     try {

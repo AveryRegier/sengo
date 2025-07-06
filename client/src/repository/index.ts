@@ -1,5 +1,4 @@
-import { FindCursor } from '../client/findCursor';
-import { Order, WithId } from '../types';
+import { FindCursor, Order, WithId } from '../types';
 import { CollectionIndex } from './collectionIndex';
 import { MemoryStore } from './memory/index';
 import { S3Store } from './s3/index';

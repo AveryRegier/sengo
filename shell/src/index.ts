@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import { SengoClient } from 'sengo-client';
+import { SengoClient, FindCursor } from 'sengo-client';
 import { EJSON } from 'bson';
 
 interface ShellCommand {
@@ -248,7 +248,10 @@ export class SengoShell {
           console.log('[DEBUG] Arguments:', JSON.stringify(parsedArgs, null, 2));
         }
         const result = await fn.apply(shell.currentCollection, parsedArgs);
-        if (result !== undefined) {
+        if(result.toArray && typeof result.toArray === 'function') {
+          const docs = await result.toArray();
+          console.log(JSON.stringify(docs, null, 2));
+        } else if (result !== undefined) {
           console.log(JSON.stringify(result, null, 2));
         }
       } else {
