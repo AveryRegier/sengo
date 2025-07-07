@@ -135,10 +135,10 @@ export class S3CollectionIndex extends BaseCollectionIndex {
           ...(entry.etag ? { IfMatch: entry.etag } : {}),
         }));
         entry.dirty = false;
-        console.log(`[S3CollectionIndex] persistEntry: Successfully persisted entry for key='${key}'`);
+      // logger not available here; consider injecting if needed for debug
         return;
       } catch (err: any) {
-        console.log(`[S3CollectionIndex] persistEntry: Error persisting entry for key='${key}':`, err);
+        // logger not available here; consider injecting if needed for debug
         if (err.$metadata && err.$metadata.httpStatusCode === 412) {
           // ETag mismatch, refetch and retry
           const fresh = await this.fetch(key);
@@ -164,7 +164,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param entry IndexEntry to persist
    */
   async persist(key: string, entry: IndexEntry): Promise<void> {
-    console.log(`[S3CollectionIndex] persist: Queuing persist for key='${key}', entry.ids=[${[...entry.ids].join(',')}]`);
+    // logger not available here; consider injecting if needed for debug
     this.indexMap.set(key, entry);
     const wasEmpty = this.persistQueue.size === 0;
     this.persistQueue.add(key);
@@ -177,7 +177,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * Internal: triggers background persist tasks up to maxTasks.
    */
   private _triggerPersist() {
-    console.log(`[S3CollectionIndex] _triggerPersist: runningTasks=${this.runningTasks}, persistQueue.size=${this.persistQueue.size}`);
+    // logger not available here; consider injecting if needed for debug
     // Always try to start up to maxTasks if there is work
     const desiredTasks = this.maxTasks;
     while (this.runningTasks < desiredTasks && this.persistQueue.size > 0) {
@@ -186,10 +186,10 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       const deleted = this.persistQueue.delete(key);
       if (!deleted) continue; // Already being processed by another task
       this.runningTasks++;
-      console.log(`[S3CollectionIndex] _triggerPersist: starting persist for key='${key}' (runningTasks=${this.runningTasks})`);
+      // logger not available here; consider injecting if needed for debug
       this._backgroundPersistTask(key).finally(() => {
         this.runningTasks--;
-        console.log(`[S3CollectionIndex] _triggerPersist: finished persist for key='${key}' (runningTasks=${this.runningTasks})`);
+        // logger not available here; consider injecting if needed for debug
         if (this.persistQueue.size > 0) {
           this._triggerPersist();
         }
@@ -275,7 +275,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   async findIdsForKey(key: string): Promise<string[]> {
     try {
       const entry = await this.getIndexEntryForKey(key);
-      console.log(`[S3CollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
+      // logger not available here; consider injecting if needed for debug
       return entry.toArray();
     } catch (err: any) {
       if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
@@ -302,20 +302,20 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    */
   async addDocument(doc: Record<string, any>): Promise<void> { 
     if(this.hasFirstKey(doc)) {
-      console.log(`[S3CollectionIndex] addDocument: Adding doc with _id=${doc._id}`);
+      // logger not available here; consider injecting if needed for debug
       const key = this.makeIndexKey(doc);
       let entry = this.indexMap.get(key);
       if (!entry) {
         // Fetch from S3 here to merge with any existing entry
         entry = await this.fetch(key);
         this.indexMap.set(key, entry);
-        console.log(`[S3CollectionIndex] addDocument: Created new index entry for key='${key}'`);
+        // logger not available here; consider injecting if needed for debug
       }
       if (entry.add(doc._id)) {
-        console.log(`[S3CollectionIndex] addDocument: Index entry for key='${key}' marked dirty, persisting...`);
+        // logger not available here; consider injecting if needed for debug
         await this.persist(key, entry);
       } else {
-        console.log(`[S3CollectionIndex] addDocument: Index entry for key='${key}' already contains _id=${doc._id}`);
+        // logger not available here; consider injecting if needed for debug
       }
     }
   }

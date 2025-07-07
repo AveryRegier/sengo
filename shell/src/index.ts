@@ -1,6 +1,7 @@
 import readline from 'node:readline';
-import { SengoClient, FindCursor } from 'sengo-client';
+import { SengoClient, SengoDb } from 'sengo-client';
 import { EJSON } from 'bson';
+import { getLogger, setLogLevel } from 'sengo-client';
 
 interface ShellCommand {
   name: string;
@@ -16,7 +17,8 @@ class ConnectCommand implements ShellCommand {
     if (shell.client) {
       console.log('Already connected. Please close the current client first.');
     } else {
-      shell.client = new SengoClient(repoType || 'memory');
+      shell.client = new SengoClient();
+      shell.db = shell.client.db(repoType);
       shell.currentCollection = null;
       console.log(`Connected to repository: ${repoType || 'memory'}`);
     }
@@ -43,12 +45,12 @@ class UseCommand implements ShellCommand {
   description = 'Select a collection. Usage: use <collectionName>';
   async run(args: string[], shell: SengoShell) {
     const [collectionName] = args;
-    if (!shell.client) {
+    if (!shell.db) {
       console.log('Not connected. Use connect <repositoryType> first.');
     } else if (!collectionName) {
       console.log('Usage: use <collectionName>');
     } else {
-      shell.currentCollection = shell.client.db().collection(collectionName);
+      shell.currentCollection = shell.db.collection(collectionName);
       console.log(`Using collection: ${collectionName}`);
     }
   }
@@ -100,9 +102,11 @@ class DebugCommand implements ShellCommand {
     const arg = args[0]?.toLowerCase();
     if (arg === 'off') {
       shell.debugMode = false;
+      setLogLevel('error');
       console.log('Debug mode OFF');
     } else {
       shell.debugMode = true;
+      setLogLevel('debug');
       console.log('Debug mode ON');
     }
   }
@@ -110,6 +114,7 @@ class DebugCommand implements ShellCommand {
 
 export class SengoShell {
   client: SengoClient | null = null;
+  db: SengoDb | null = null;
   currentCollection: any = null;
   exiting = false; // Prevent duplicate exit
   debugMode = false;
@@ -148,7 +153,7 @@ export class SengoShell {
       try {
         await this.commands[command].run(rest, this);
       } catch (err: any) {
-        console.error('Error:', err.message);
+        getLogger().error(err, { command, line });
       }
       return;
     }
@@ -156,7 +161,7 @@ export class SengoShell {
       try {
         await this.commands[command].run(rest, this);
       } catch (err: any) {
-        console.error('Error:', err.message);
+        getLogger().error(err, { command, line });
       }
       this.rl.prompt();
       return;
@@ -165,7 +170,7 @@ export class SengoShell {
     try {
       await this.defaultCommand.run([command, ...rest], this);
     } catch (err: any) {
-      console.error('Error:', err.message);
+      getLogger().error(err, { command, line });
     }
     this.rl.prompt();
   }
@@ -203,6 +208,7 @@ export class SengoShell {
             args.push(EJSON.parse(buffer));
           } catch (err) {
             console.error('Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.');
+            getLogger().error(err);
             return [];
           }
           inJson = false;
@@ -218,6 +224,7 @@ export class SengoShell {
         args.push(EJSON.parse(buffer));
       } catch (err) {
         console.error('Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.');
+        getLogger().error(err);
         return [];
       }
     }
@@ -244,11 +251,12 @@ export class SengoShell {
       const fn = shell.currentCollection[command];
       if (typeof fn === 'function') {
         const parsedArgs = shell.parseArgsWithJson(rest);
+        getLogger().info({ command, args: parsedArgs }, 'Executing command');
         if (shell.debugMode) {
           console.log('[DEBUG] Arguments:', JSON.stringify(parsedArgs, null, 2));
         }
         const result = await fn.apply(shell.currentCollection, parsedArgs);
-        if(result.toArray && typeof result.toArray === 'function') {
+        if(result?.toArray && typeof result.toArray === 'function') {
           const docs = await result.toArray();
           console.log(JSON.stringify(docs, null, 2));
         } else if (result !== undefined) {

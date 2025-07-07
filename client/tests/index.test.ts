@@ -30,16 +30,17 @@ describe('SengoClient basic API', () => {
     const collection = client.db().collection('animals');
     await collection.insertOne({ name: 'test', kind: 'cat' });
     await client.close();
-    expect(() => client.db().collection('animals')).toThrow('Store is closed');
+    expect(() => collection.find({})).toThrow('Store is closed');
   });
 });
 
 describe('SengoClient close behavior', () => {
   it('should throw if db() is called after close()', async () => {
     const client = new SengoClient();
+    const db = client.db();
     await client.close();
-    expect(() => client.db()).not.toThrow(); // db() should not throw, only collection() should
-    expect(() => client.db().collection('animals')).toThrow('Store is closed');
+    expect(() => client.db()).not.toThrow(); // allow another call to create a fresh db.
+    expect(() => db.collection('animals')).toThrow('Store is closed');
   });
 
   it('should throw if insertOne is called after collection is closed', async () => {

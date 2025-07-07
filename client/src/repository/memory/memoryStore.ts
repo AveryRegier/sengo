@@ -14,6 +14,10 @@ export class MemoryStore implements DbStore {
     return this.stores[name];
   }
 
+  isClosed(): boolean {
+    return this.closed;
+  }
+
   async close() {
     this.closed = true;
     for (const store of Object.values(this.stores)) {

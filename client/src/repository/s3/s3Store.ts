@@ -19,6 +19,10 @@ export class S3Store implements DbStore {
     return this.stores[name] as CollectionStore<T>;
   }
 
+  isClosed(): boolean {
+    return this.closed;
+  }
+
   async close() {
     this.closed = true;
     for (const store of Object.values(this.stores)) {

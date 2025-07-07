@@ -2,15 +2,18 @@ import { MongoClientClosedError, MongoServerError } from '../errors.js';
 import { CollectionIndex, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { FindCursor, IndexDefinition, WithId } from '../types';
+import { getLogger } from './logger';
 
 export class SengoCollection<T> {
   name: string;
   store: CollectionStore<T>;
   private _indexes: Record<string, CollectionIndex> = {};
+  private logger: ReturnType<typeof getLogger>;
 
-  constructor(name: string, store: CollectionStore<T>) {
+  constructor(name: string, store: CollectionStore<T>, logger?: ReturnType<typeof getLogger>) {
     this.name = name;
     this.store = store;
+    this.logger = logger || getLogger({ collection: name });
   }
 
   /**
@@ -28,13 +31,13 @@ export class SengoCollection<T> {
       throw new MongoClientClosedError('Store is closed');
     }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
-    console.log('[SengoCollection.insertOne] Inserting:', JSON.stringify(docWithId));
+    this.logger.debug({ doc: docWithId }, 'Inserting document');
     await this.store.replaceOne({ _id: docWithId._id }, docWithId);
     // Index maintenance: update all indexes
     for (const indexName in this._indexes) {
       const index = this._indexes[indexName];
       // Only call updateIndexOnDocumentUpdate, which is the public API
-      console.log(`[SengoCollection.insertOne] Adding doc to index '${indexName}':`, JSON.stringify(docWithId));
+      this.logger.debug({ indexName, doc: docWithId }, 'Adding doc to index');
       // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
       await index.addDocument(docWithId);
     }
@@ -43,7 +46,7 @@ export class SengoCollection<T> {
 
   find(query: Record<string, any>): FindCursor<WithId<T>> {
     const result = this.store.find(query);
-    //console.log('[SengoCollection.find] Query:', JSON.stringify(query), 'Result:', JSON.stringify(result.toArray));
+    //this.logger.debug({ query }, 'Find called');
     return result;
   }
 
@@ -100,7 +103,7 @@ export class SengoCollection<T> {
     // Actually create the index in the store
     const index = await this.store.createIndex(fields || 'default_index', normalizedKeys);
     // Build the index here (assume contract is always fulfilled)
-    console.log(`[SengoCollection] Calling this.store.find({}) after index creation for index '${fields || 'default_index'}'`);
+    this.logger.debug({ index: fields || 'default_index' }, 'Calling this.store.find({}) after index creation');
     const allDocs = await this.store.find({});
     if(await allDocs.hasNext()) { 
       do  {

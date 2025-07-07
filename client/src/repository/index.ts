@@ -26,11 +26,10 @@ export interface CollectionStore<T> {
 export interface DbStore {
   collection<T>(name: string): CollectionStore<T>;
   close(): Promise<void>;
+  isClosed(): boolean;
 }
 
 export function createRepository(name: string): DbStore {
-
-
   if (name !== 'memory') {
     return new S3Store(name);
   } else {

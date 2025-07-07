@@ -14,7 +14,7 @@ export class MemoryCollectionIndex extends BaseCollectionIndex implements Collec
       entry = await this.fetch(key);
       this.indexMap.set(key, entry);
     }
-    console.log(`[MemoryCollectionIndex.findIdsForKey] key='${key}', ids=[${entry.toArray().join(',')}]`);
+    // logger is not available here; consider injecting if needed for debug
     return entry.toArray();
   }
 }

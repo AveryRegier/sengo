@@ -1,23 +1,29 @@
-import type { DbStore } from '../repository/index';
-import { createRepository } from '../repository/index';
-import { SengoCollection } from './collection';
+import { SengoDb } from './db';
+import { getLogger } from './logger';
+
+export type SengoClientOptions = {
+  logger?: { level: string };
+}
 
 export class SengoClient {
-  private dbStore: DbStore;
-  constructor(repositoryType: string = 'memory') {
-    this.dbStore = createRepository(repositoryType);
+  private databases: Record<string, SengoDb> = {};
+  constructor(options: SengoClientOptions = {}) {
+    // Initialize logger based on options
+    getLogger().level = options?.logger?.level || 'info';
   }
 
-  db(dbName?: string) {
-    const self = this;
-    return {
-      collection<T>(name: string): SengoCollection<T> {
-        return new SengoCollection<T>(name, self.dbStore.collection<T>(name));
-      }
-    };
+  db(dbName: string = 'memory') {
+    if (!this.databases[dbName]) {
+      this.databases[dbName] = new SengoDb(dbName);
+    }
+    return this.databases[dbName];
   }
 
   async close() {
-    await this.dbStore.close();
+    for (const dbName in this.databases) {
+      await this.databases[dbName].close();
+      delete this.databases[dbName]; // Clean up after closing
+    }
+    getLogger().info('All databases closed');
   }
 }
