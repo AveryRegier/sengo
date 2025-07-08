@@ -13,9 +13,10 @@ export * from './collectionIndex';
 export type NormalizedIndexKeyRecord = { field: string, order: Order };
 
 export interface CollectionStore<T> {
+  getIndexes(): Promise<Map<string, CollectionIndex>>;
   close(): Promise<void>;
   createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex>;
-  deleteOneById(id: any): Promise<void>;
+  deleteOne(id: any): Promise<void>;
   dropIndex(name: string): Promise<void>;
   find(query: Record<string, any>): FindCursor<WithId<T>>;
   isClosed(): boolean;

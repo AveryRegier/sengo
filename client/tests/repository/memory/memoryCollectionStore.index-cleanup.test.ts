@@ -25,5 +25,9 @@ describe('MemoryCollectionStore index cleanup on delete', () => {
     // Confirm find does not return the deleted doc
     const found = await collection.find({ name: 'Clancy' }).toArray();
     expect(found.map(d => d._id)).toEqual(['b']);
+
+    // Drop the index and verify it is removed from the store
+    await collection.dropIndex(indexName);
+    expect(store.getIndex(indexName)).toBeUndefined();
   });
 });

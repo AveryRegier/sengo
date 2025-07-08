@@ -7,7 +7,6 @@ import { getLogger } from './logger';
 export class SengoCollection<T> {
   name: string;
   store: CollectionStore<T>;
-  private _indexes: Record<string, CollectionIndex> = {};
   private logger: ReturnType<typeof getLogger>;
 
   constructor(name: string, store: CollectionStore<T>, logger?: ReturnType<typeof getLogger>) {
@@ -20,9 +19,7 @@ export class SengoCollection<T> {
    * Drop an index by name (MongoDB compatible: dropIndex)
    */
   async dropIndex(name: string): Promise<void> {
-    return this.store.dropIndex(name).then(() => {
-      delete this._indexes[name];
-    });
+    return this.store.dropIndex(name);
   }
 
   async insertOne(doc: Record<string, any>) {
@@ -34,10 +31,9 @@ export class SengoCollection<T> {
     this.logger.debug({ doc: docWithId }, 'Inserting document');
     await this.store.replaceOne({ _id: docWithId._id }, docWithId);
     // Index maintenance: update all indexes
-    for (const indexName in this._indexes) {
-      const index = this._indexes[indexName];
+    for (const [name, index] of await this.store.getIndexes()) {
       // Only call updateIndexOnDocumentUpdate, which is the public API
-      this.logger.debug({ indexName, doc: docWithId }, 'Adding doc to index');
+      this.logger.debug({ name, doc: docWithId }, 'Adding doc to index');
       // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
       await index.addDocument(docWithId);
     }
@@ -73,8 +69,8 @@ export class SengoCollection<T> {
     await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
 
     // Index maintenance: let each index handle the update logic
-    for (const indexName in this._indexes) {
-      const index = this._indexes[indexName];
+    for (const [name, index] of await this.store.getIndexes()) {
+      this.logger.debug({ name, doc: updatedDoc }, 'Updating doc in index');
       await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
     }
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
@@ -91,8 +87,13 @@ export class SengoCollection<T> {
     }
     const docId = found._id;
     // Call the store to delete by _id
-    await this.store.deleteOneById(docId);
-    // Remove from indexes if needed (index maintenance handled in store or here as needed)
+    await this.store.deleteOne(found);
+    
+    // Remove from all indexes
+    for (const [name, index] of await this.store.getIndexes()) {
+      this.logger.debug({ name, doc: found }, 'Removing doc from index');
+      await index.removeIdFromAllKeys(found._id?.toString(), found);
+    }
     return { deletedCount: 1 };
   }
 
@@ -113,8 +114,6 @@ export class SengoCollection<T> {
       // If this is the last document, flush
       await index.flush();
     }
-    // Track the index for future maintenance
-    this._indexes[fields || 'default_index'] = index;
     return fields || 'default_index';
   }
 }

@@ -56,5 +56,10 @@ describe('S3CollectionStore index cleanup on delete', () => {
     // Confirm find does not return the deleted doc
     const found = await collection.find({ name: 'Clancy' }).toArray();
     expect(found.map(d => d._id)).toEqual(['b']);
+
+    // Drop the index and verify the index entry file is deleted
+    await collection.dropIndex(indexName);
+    // The entry file should be deleted
+    expect(s3sim.getFile(entryKey)).toBeUndefined();
   });
 });

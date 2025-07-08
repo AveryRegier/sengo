@@ -58,8 +58,30 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * This is used for deleteOneById to ensure the ID is removed from all index entries.
    * @param id Document _id to remove
    */
-  async removeIdFromAllKeys(id: string): Promise<void> {
+  /**
+   * Remove a document ID from all relevant index entry files (for this index).
+   * Only loads the entry files that could contain the ID, based on the index key spec.
+   * @param id Document _id to remove
+   * @param doc (optional) The full document, if available, to compute the key(s) directly.
+   */
+  public async removeIdFromAllKeys(id: string, doc?: Record<string, any>): Promise<void> {
     const idStr = id.toString();
+    // If doc is provided, we can compute the key directly
+    if (doc) {
+      const key = this.makeIndexKey(doc);
+      let entry = this.indexMap.get(key);
+      if (!entry) {
+        entry = await this.fetch(key);
+        this.indexMap.set(key, entry);
+      }
+      if (entry.ids.has(idStr)) {
+        entry.ids.delete(idStr);
+        entry.dirty = true;
+        await this.persist(key, entry);
+      }
+      return;
+    }
+    // If doc is not provided, we must check all loaded entries (fallback)
     for (const [key, entry] of this.indexMap.entries()) {
       if (entry.ids.has(idStr)) {
         entry.ids.delete(idStr);

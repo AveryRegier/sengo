@@ -13,6 +13,7 @@ export interface CollectionIndex {
    * This method should be idempotent and safe to call for any update.
    */
   updateIndexOnDocumentUpdate(oldDoc: Record<string, any>, newDoc: Record<string, any>): Promise<void>;
+  removeIdFromAllKeys<U>(id: string, doc: Record<string, any>): unknown;
   isBusy?(): boolean;
   getStatus?(): { pendingInserts: number; runningTasks: number; avgPersistMs: number; estTimeToClearMs: number };
   flush(): Promise<void>;
@@ -141,6 +142,10 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   protected hasFirstKey(doc: Record<string, any>): boolean {
     const value = doc[this.keys[0]?.field];
     return value !== undefined && value !== null && value !== '';
+  }
+
+  removeIdFromAllKeys<U>(id: string, doc: Record<string, any>): unknown {
+    return Promise.resolve();
   }
 }
 

@@ -31,6 +31,10 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     this.name = name || '';
   }
 
+  async getIndexes(): Promise<Map<string, CollectionIndex>> {
+      return Promise.resolve(this.indexes as Map<string, CollectionIndex>) ;
+  }
+
   async insertOne(doc: Record<string, any>) {
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
     await this.replaceOne({ _id: docWithId._id }, docWithId);
@@ -73,9 +77,9 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
    * Deletes a document by _id.
    * @param id Document _id
    */
-  async deleteOneById(id: any): Promise<void> {
+  async deleteOne(doc: WithId<T>): Promise<void> {
     this.checkClosure();
-    const idx = this.documents.findIndex(d => d._id?.toString() === id?.toString());
+    const idx = this.documents.findIndex(d => d._id?.toString() === doc._id?.toString());
     if (idx === -1) return;
     const [removed] = this.documents.splice(idx, 1);
     // Remove from all indexes

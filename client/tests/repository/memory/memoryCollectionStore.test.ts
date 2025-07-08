@@ -74,7 +74,7 @@ describe('MemoryCollectionStore', () => {
     let found = await store.find({ _id: doc._id }).toArray();
     expect(found.length).toBe(1);
     // Delete
-    await store.deleteOneById(doc._id);
+    await store.deleteOne(doc);
     // Should be gone
     found = await store.find({ _id: doc._id }).toArray();
     expect(found.length).toBe(0);

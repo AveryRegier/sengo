@@ -119,7 +119,7 @@ describe('S3CollectionStore', () => {
     // Confirm present
     expect(s3sim.getFile(`${collection}/data/del1.json`)).toBe(JSON.stringify(doc));
     // Delete
-    await store.deleteOneById(doc._id);
+    await store.deleteOne(doc);
     // Should be gone
     expect(s3sim.getFile(`${collection}/data/del1.json`)).toBeUndefined();
   });

@@ -40,6 +40,11 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     });
   }
 
+  async getIndexes(): Promise<Map<string, CollectionIndex>> {
+    await this.ensureIndexesLoaded();
+    return Promise.resolve(this.loadedIndexes); 
+  }
+  
   async dropIndex(name: string): Promise<void> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     await this.ensureIndexesLoaded();
@@ -80,6 +85,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   async replaceOne(filter: Record<string, any>, doc: Record<string, any>) {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
+    this.ensureIndexesLoaded();
     const _id = filter._id ?? doc._id;
     if (!_id) throw new MongoInvalidArgumentError('replaceOne requires _id');
     const key = this.id2key(_id);
@@ -97,10 +103,10 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
    * Deletes a document by _id from S3.
    * @param id Document _id
    */
-  async deleteOneById(id: any): Promise<void> {
+  async deleteOne(doc: WithId<T>): Promise<void> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
-    if (!id) throw new MongoInvalidArgumentError('deleteOneById requires id');
-    const key = this.id2key(id);
+    if (!doc._id) throw new MongoInvalidArgumentError('deleteOne requires _id');
+    const key = this.id2key(doc._id);
     await this.s3.send(new DeleteObjectCommand({
       Bucket: this.bucket,
       Key: key,
@@ -108,7 +114,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     // Remove from all indexes
     await this.ensureIndexesLoaded();
     for (const index of this.loadedIndexes.values()) {
-      await index.removeIdFromAllKeys(id);
+      await index.removeIdFromAllKeys(doc._id?.toString(), doc);
     }
   }
 
@@ -192,13 +198,13 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     }
   }
 
-  private async loadRecordByKey(key: string): Promise<WithId<T>> {
+  private async loadRecordByKey(key: string): Promise<WithId<T> | null> {
     try {
       const result = await this.s3.send(new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
       }));
-      if (!result || !result.Body) throw Object.assign(new MongoServerError('Not found'), { name: 'NoSuchKey' });
+      if (!result || !result.Body) return null; //throw Object.assign(new MongoServerError('Not found'), { name: 'NoSuchKey' });
       const data = await getBodyAsString(result);
       return JSON.parse(data);
     } catch (err: any) {
@@ -246,6 +252,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
     if (this.closed) throw new Error('Store is closed');
+    this.ensureIndexesLoaded();
     // 1. Create and persist the index metadata file
     const index = { name, keys };
     await this.s3.send(new PutObjectCommand({
@@ -275,6 +282,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     const listed = await this.s3.send(new ListObjectsV2Command({
       Bucket: this.bucket,
       Prefix: prefix,
+      Delimiter: '/' // Only list files directly under indices/ (no further slashes)
     }));
     if (!listed.Contents) return;
     for (const obj of listed.Contents) {
