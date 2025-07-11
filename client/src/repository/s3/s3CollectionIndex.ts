@@ -53,6 +53,10 @@ export class S3CollectionIndex extends BaseCollectionIndex {
     this.bucket = opts.bucket;
   }
 
+  public getIndexMap(): Map<string, IndexEntry> {
+    return this.indexEntryCache;
+  }
+
   /**
    * Remove a document ID from all index keys in memory and persist changes.
    * This is used for deleteOneById to ensure the ID is removed from all index entries.
@@ -69,11 +73,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
     // If doc is provided, we can compute the key directly
     if (doc) {
       const key = this.makeIndexKey(doc);
-      let entry = this.indexMap.get(key);
-      if (!entry) {
-        entry = await this.fetch(key);
-        this.indexMap.set(key, entry);
-      }
+      let entry = await this.fetch(key);
       if (entry.ids.has(idStr)) {
         entry.ids.delete(idStr);
         entry.dirty = true;
@@ -82,11 +82,13 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       return;
     }
     // If doc is not provided, we must check all loaded entries (fallback)
-    for (const [key, entry] of this.indexMap.entries()) {
+    for (const [key, entry] of this.indexEntryCache.entries()) {
       if (entry.ids.has(idStr)) {
         entry.ids.delete(idStr);
         entry.dirty = true;
         await this.persist(key, entry);
+        // Always update the cache to the current entry object
+        this.indexEntryCache.set(key, entry);
       }
     }
   }
@@ -99,7 +101,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   async removeDocument(doc: Record<string, any>): Promise<void> {
     await super.removeDocument(doc);
     const key = this.makeIndexKey(doc);
-    const entry = this.indexMap.get(key);
+    const entry = this.indexEntryCache.get(key);
     if (entry && entry.dirty) {
       await this.persist(key, entry);
     }
@@ -111,6 +113,9 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param key Index key
    */
   protected async fetch(key: string): Promise<IndexEntry> {
+    if( this.indexEntryCache.has(key)) {
+      return this.indexEntryCache.get(key)!; // Return cached entry if available
+    }
     // key is now just the value(s) of the indexed field(s), already encoded by makeIndexKey
     // Do NOT re-encode here; just use as-is to match file naming in tests and production
     const s3Key = `${this.collectionName}/indices/${this.name}/${key}.json`;
@@ -128,7 +133,9 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       });
       const ids = JSON.parse(data);
       const etag = result.ETag;
-      return new IndexEntry(Array.isArray(ids) ? ids : [], etag);
+      const entry = new IndexEntry(Array.isArray(ids) ? ids : [], etag);
+      this.indexEntryCache.set(key, entry); // Cache the entry for future use
+      return entry;
     } catch (err: any) {
       // Not found, start with empty
       return new IndexEntry();
@@ -187,7 +194,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    */
   async persist(key: string, entry: IndexEntry): Promise<void> {
     // logger not available here; consider injecting if needed for debug
-    this.indexMap.set(key, entry);
+    this.indexEntryCache.set(key, entry);
     const wasEmpty = this.persistQueue.size === 0;
     this.persistQueue.add(key);
     if (wasEmpty) {
@@ -234,7 +241,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * Internal: background persist task for a single key.
    */
   private async _backgroundPersistTask(key: string) {
-    const entry = this.indexMap.get(key);
+    const entry = this.indexEntryCache.get(key);
     if (!entry) return;
     const start = Date.now();
     await this.persistEntry(key, entry);
@@ -323,22 +330,15 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param doc Document to add
    */
   async addDocument(doc: Record<string, any>): Promise<void> { 
-    if(this.hasFirstKey(doc)) {
-      // logger not available here; consider injecting if needed for debug
+    if (this.hasFirstKey(doc)) {
       const key = this.makeIndexKey(doc);
-      let entry = this.indexMap.get(key);
-      if (!entry) {
-        // Fetch from S3 here to merge with any existing entry
-        entry = await this.fetch(key);
-        this.indexMap.set(key, entry);
-        // logger not available here; consider injecting if needed for debug
-      }
+      // Always use the same object as is in the cache, if present
+      let entry = await this.fetch(key);
       if (entry.add(doc._id)) {
-        // logger not available here; consider injecting if needed for debug
         await this.persist(key, entry);
-      } else {
-        // logger not available here; consider injecting if needed for debug
       }
+      // Always update the cache to the current entry object
+      this.indexEntryCache.set(key, entry);
     }
   }
 

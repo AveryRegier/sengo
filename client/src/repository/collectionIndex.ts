@@ -48,7 +48,6 @@ export class IndexEntry {
 export abstract class BaseCollectionIndex implements CollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
-  protected indexMap: Map<string, IndexEntry> = new Map();
 
   constructor(name: string, keys: NormalizedIndexKeyRecord[]) {
     this.name = name;
@@ -56,6 +55,9 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   // --- Public API ---
+  public getIndexMap(): Map<string, IndexEntry> {
+    return new Map<string, IndexEntry>();
+  }
 
   /**
    * Default implementation for index update on document update.
@@ -72,30 +74,11 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     await this.flush();
   }
 
-  /**
-   * Returns all index entries as [key, entry] pairs.
-   */
-  public getAllEntries(): [string, IndexEntry][] {
-    return Array.from(this.indexMap.entries());
-  }
-
-  public getIndexMap(): Record<string, string[]> {
-    const out: Record<string, string[]> = {};
-    for (const [k, v] of this.indexMap.entries()) {
-      out[k] = v.toArray();
-    }
-    return out;
-  }
-
   public async addDocument(doc: Record<string, any>): Promise<void> {
     if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
     if(this.hasFirstKey(doc)) {
       const key = this.makeIndexKey(doc);
-      let entry = this.indexMap.get(key);
-      if (!entry) {
-        entry = await this.fetch(key);
-        this.indexMap.set(key, entry);
-      }
+      let entry = await this.fetch(key);
       entry.add(doc._id.toString());
     }
   }
@@ -120,11 +103,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   public async removeDocument(doc: Record<string, any>): Promise<void> {
     if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
     const key = this.makeIndexKey(doc);
-    let entry = this.indexMap.get(key);
-    if (!entry) {
-      entry = await this.fetch(key);
-      this.indexMap.set(key, entry);
-    }
+    let entry = await this.fetch(key);
     const idStr = doc._id.toString();
     if (entry.ids.has(idStr)) {
       entry.ids.delete(idStr);

@@ -129,7 +129,9 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
     // Check that the index contains the expected docs (if getIndexMap is available)
     if (index && typeof (index as any).getIndexMap === 'function') {
       const map = (index as any).getIndexMap();
-      expect(Object.values(map).flat()).toEqual(expect.arrayContaining(['a', 'b']));
+      // Map<string, IndexEntry> -- flatten all doc IDs from all entries
+      const allIds = Array.from(map.values()).flatMap((entry: any) => typeof entry.toArray === 'function' ? entry.toArray() : entry);
+      expect(allIds).toEqual(expect.arrayContaining(['a', 'b']));
     }
     // Check S3 PutObjectCommand calls for index metadata and entries
     const putCalls = sendMock.mock.calls.filter(([cmd]: any[]) => cmd.constructor.name === 'PutObjectCommand');
@@ -168,7 +170,8 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
       await index.flush();
       // After flush, all docs should be indexed
       const map = index.getIndexMap();
-      const allIds = Object.values(map).flat();
+      // Map<string, IndexEntry> -- flatten all doc IDs from all entries
+      const allIds = Array.from(map.values()).flatMap((entry: any) => typeof entry.toArray === 'function' ? entry.toArray() : entry);
       expect(allIds).toEqual(expect.arrayContaining(['a', 'b']));
     }
   }, 20000);

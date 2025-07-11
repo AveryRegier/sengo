@@ -42,9 +42,9 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   async getIndexes(): Promise<Map<string, CollectionIndex>> {
     await this.ensureIndexesLoaded();
-    return Promise.resolve(this.loadedIndexes); 
+    return Promise.resolve(this.loadedIndexes) as Promise<Map<string, CollectionIndex>>;
   }
-  
+
   async dropIndex(name: string): Promise<void> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     await this.ensureIndexesLoaded();
@@ -111,11 +111,6 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       Bucket: this.bucket,
       Key: key,
     }));
-    // Remove from all indexes
-    await this.ensureIndexesLoaded();
-    for (const index of this.loadedIndexes.values()) {
-      await index.removeIdFromAllKeys(doc._id?.toString(), doc);
-    }
   }
 
   private id2key(id: any) {

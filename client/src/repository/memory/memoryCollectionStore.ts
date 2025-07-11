@@ -9,11 +9,7 @@ export class MemoryCollectionIndex extends BaseCollectionIndex implements Collec
   // Inherits removeDocument from BaseCollectionIndex
 
   async findIdsForKey(key: string): Promise<string[]> {
-    let entry = this.indexMap.get(key);
-    if (!entry) {
-      entry = await this.fetch(key);
-      this.indexMap.set(key, entry);
-    }
+    let entry = await this.fetch(key);
     // logger is not available here; consider injecting if needed for debug
     return entry.toArray();
   }
