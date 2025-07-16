@@ -4,8 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const semver = require('semver');
 
-const clientRoot = __dirname;
-const distDir = path.resolve(__dirname, 'dist');
+const clientRoot = path.resolve(__dirname, '..', '..', 'client');
+const distDir = path.resolve(clientRoot, 'dist');
 const buildDir = path.join(clientRoot, 'build');
 const buildCjsDir = path.join(clientRoot, 'build-cjs');
 const typesDir = path.join(clientRoot, 'build', 'types');

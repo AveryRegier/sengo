@@ -86,20 +86,32 @@ describe('SengoCollection createIndex and find (Memory)', () => {
     }
   });
 
-  it('should create index and flush to ensure all docs are indexed', async () => {
-    // Memory store does not have a persistent index implementation; skip index assertions
+  it('should create index and allow queries to work as expected', async () => {
+    // Only observable behavior is tested for memory store
     const indexField = Object.keys(docs[0]).find(k => k !== '_id')!;
     const indexName = await collection.createIndex({ [indexField]: 1 });
     expect(typeof indexName).toBe('string');
+    // Query by the indexed field should return at least one doc
+    const value = docs[0][indexField];
+    const found = await collection.find({ [indexField]: value }).toArray();
+    expect(found.length).toBeGreaterThanOrEqual(1);
+    expect(found.some(d => d.email === docs[0].email)).toBe(true);
   });
 
-  it('removes document ID from old index entry and adds to new one when indexed field changes on update', async () => {
-    // Memory store does not have a persistent index implementation; skip index assertions
+  it('updates to indexed fields allow correct query results', async () => {
+    // Only observable behavior is tested for memory store
     const doc = { ...docCreator(), foo: 'A' };
     const insertResult = await collection.insertOne(doc);
     const docId = insertResult.insertedId.toString();
     const indexName = await collection.createIndex({ foo: 1 });
     await collection.updateOne({ _id: docId }, { $set: { foo: 'B' } });
+    // Should not find doc by old value
+    let found = await collection.find({ foo: 'A' }).toArray();
+    expect(found.length).toBe(0);
+    // Should find doc by new value
+    found = await collection.find({ foo: 'B' }).toArray();
+    expect(found.length).toBe(1);
+    expect(found[0]._id.toString()).toBe(docId);
   });
   it('deleteOne removes a document so it cannot be found', async () => {
     const doc = { ...docCreator(), foo: 'Z' };
@@ -135,7 +147,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
       res1.insertedId.toString(),
       res2.insertedId.toString(),
     ]).toContain(found[0]._id.toString());
-    // The deleted _id should be removed from all indexes (memory store: skip index assertions)
+    // The deleted _id should not be found in any query (memory store: skip index assertions)
   });
   // ...existing code...
 
