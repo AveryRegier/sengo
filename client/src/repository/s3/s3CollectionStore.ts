@@ -153,9 +153,9 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   private async findFilterSort(query: Record<string, any>): Promise<WithId<T>[]> {
     return this.findCandidates(query).then(async results => {
-      return results.filter(parsed => {
-        if (parsed && typeof parsed === 'object' && (parsed as any)._id !== undefined) {
-          if (Object.entries(query).every(([k, v]) => (parsed as Record<string, any>)[k]?.toString() === v?.toString())) {
+      return results.filter((parsed: Record<string, any>) => {
+        if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
+          if (Object.entries(query).every(([k, v]) => match(parsed, k, v))) {
             return true;
           }
         }
@@ -173,9 +173,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     await this.ensureIndexesLoaded();
     const index = this.findBestIndex(query);
     if (index) {
-      const key = (typeof (index as any).getIndexKeyForQuery === 'function')
-        ? (index as any).getIndexKeyForQuery(query)
-        : (index as any).makeIndexKey(query);
+      const key = index.makeIndexKey(query);
       const keys = (await index.findIdsForKey(key)).map(this.id2key.bind(this));
       return await this.loadTheseDocuments<T>(keys);
     }
@@ -329,6 +327,16 @@ export class MongoNetworkError extends Error {
     super(message);
     this.name = 'MongoNetworkError';
   }
+}
+
+function match(parsed: Record<string, any>, k: string, v: any): unknown {
+  const foundValue = parsed[k];
+  if(v) {
+    if(v.$in) {
+      return v.$in.includes(foundValue);
+    }
+  }
+  return foundValue?.toString() === v?.toString();
 }
 
 async function getBodyAsString(result: GetObjectCommandOutput): Promise<string> {

@@ -353,12 +353,4 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       this._triggerPersist(); // keep triggering in case async tasks are missed
     }
   }
-
-  /**
-   * Public wrapper for makeIndexKey to allow S3CollectionStore to generate keys for queries.
-   * @param query Query object
-   */
-  public getIndexKeyForQuery(query: Record<string, any>): string {
-    return this.makeIndexKey(query);
-  }
 }

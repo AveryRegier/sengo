@@ -1,21 +1,7 @@
 import { S3CollectionStore } from '../../../src/repository/s3/s3CollectionStore';
 import type { S3CollectionStoreOptions } from '../../../src/repository/s3/s3CollectionStore';
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { S3BucketSimulator } from './S3BucketSimulator';
-
-vi.mock('@aws-sdk/client-s3', async () => {
-  return {
-    S3Client: class { send = vi.fn(); },
-    GetObjectCommand: function(input: any) { return { type: 'GetObjectCommand', input }; },
-    PutObjectCommand: function(input: any) { return { type: 'PutObjectCommand', input }; },
-    ListObjectsV2Command: function(input: any) { return { type: 'ListObjectsV2Command', input }; },
-    DeleteObjectCommand: function(input: any) { return { type: 'DeleteObjectCommand', input }; },
-    // Add other S3 commands as needed
-  };
-});
-
-const mockSend = vi.fn();
 // S3Client is now a class with a send method (from our vi.mock above)
 // No need for mockImplementation; just use the mock as provided
 
@@ -38,11 +24,6 @@ describe('S3CollectionStore', () => {
     s3sim = new S3BucketSimulator();
     s3Client = { send: s3sim.handleCommand.bind(s3sim) };
   });
-
-  function s3MockSend(cmd: any) {
-    // Forward all S3 commands to the simulator's handleCommand, which mimics S3 behavior for both known and unknown commands
-    return s3sim.handleCommand(cmd);
-  }
 
   it('should replace (upsert) a document successfully', async () => {
     const store = new S3CollectionStore(collection, bucket, opts);
