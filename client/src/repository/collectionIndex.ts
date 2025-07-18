@@ -90,6 +90,21 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     return this.keys.map(k => `${doc[k.field] ?? ''}`).join('|');
   }
 
+  public findKeysForQuery(query: Record<string, any>): string[] {
+    // Find keys that match the query
+    return this.keys.reduce((acc, key) => {
+        const valueToFind = query[key.field];
+      if (valueToFind !== undefined) {
+        if (valueToFind.$in) {
+          valueToFind.$in.forEach((v: string) => acc.push(`${v}`));
+        } else {
+          acc.push(`${valueToFind}`);
+        }
+      }
+      return acc;
+    }, [] as string[]);
+  }
+
   public async flush(): Promise<void> {
     // No async persistence in memory, so just resolve immediately
     return;

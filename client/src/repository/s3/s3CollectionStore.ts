@@ -154,9 +154,15 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     await this.ensureIndexesLoaded();
     const index = this.findBestIndex(query);
     if (index) {
-      const key = index.makeIndexKey(query);
-      const keys = (await index.findIdsForKey(key)).map(this.id2key.bind(this));
-      return await this.loadTheseDocuments<T>(keys);
+
+      const docsArrays = await Promise.all(
+        index.findKeysForQuery(query).map(async key => {
+          const ids = (await index.findIdsForKey(key)).map(this.id2key.bind(this));
+          return await this.loadTheseDocuments<T>(ids);
+        })
+      );
+      return docsArrays.flat();
+
     }
     return this.scan();
   }
