@@ -70,8 +70,10 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     if (oldDoc && oldDoc._id && oldKey !== newKey && typeof (this.removeDocument) === 'function') {
       await this.removeDocument(oldDoc);
     }
-    await this.addDocument(newDoc);
-    await this.flush();
+    await this.addDocument(newDoc).finally(() => {
+      // Ensure the index is flushed after adding the new document
+      return this.flush();
+    });
   }
 
   public async addDocument(doc: Record<string, any>): Promise<void> {
