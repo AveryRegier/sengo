@@ -1,5 +1,5 @@
 import { MongoClientClosedError, MongoServerError } from '../errors.js';
-import { CollectionIndex, normalizeIndexKeys, type CollectionStore } from '../repository/index';
+import { normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
@@ -41,9 +41,21 @@ export class SengoCollection<T> {
   }
 
   find(query: Record<string, any>): FindCursor<WithId<T>> {
-    const result = this.store.find(query);
-    //this.logger.debug({ query }, 'Find called');
-    return result;
+    // Return a FindCursor that will fetch the results lazily
+    return new LoadCursor<WithId<T>>(() => this.findFilterSort(query));
+  }
+
+  private async findFilterSort(query: Record<string, any>): Promise<WithId<T>[]> {
+    return this.store.findCandidates(query).then(async results => {
+      return results.filter((parsed: Record<string, any>) => {
+        if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
+          if (Object.entries(query).every(([k, v]) => match(parsed, k, v))) {
+            return true;
+          }
+        }
+        return false;
+      });
+    });
   }
 
   async updateOne(filter: Record<string, any>, update: Record<string, any>) {
@@ -105,9 +117,9 @@ export class SengoCollection<T> {
     const index = await this.store.createIndex(fields || 'default_index', normalizedKeys);
     // Build the index here (assume contract is always fulfilled)
     this.logger.debug({ index: fields || 'default_index' }, 'Calling this.store.find({}) after index creation');
-    const allDocs = await this.store.find({});
-    if(await allDocs.hasNext()) { 
-      do  {
+    const allDocs = await this.find({});
+    if(await allDocs.hasNext()) {
+      do {
         const doc = await allDocs.next();
         if(doc) await index.addDocument(doc);
       } while(await allDocs.hasNext());
@@ -115,5 +127,65 @@ export class SengoCollection<T> {
       await index.flush();
     }
     return fields || 'default_index';
+  }
+}
+
+function match(parsed: Record<string, any>, k: string, v: any): unknown {
+  const foundValue = parsed[k];
+  if(v) {
+    if(v.$in) {
+      return v.$in.includes(foundValue);
+    }
+  }
+  return foundValue?.toString() === v?.toString();
+}
+
+class LoadCursor<T> implements FindCursor<T> {
+  private _docs: WithId<T>[] | undefined;
+  private _index: number = 0;
+  private _closed: boolean = false;
+  private _loader: () => Promise<WithId<T>[]>;
+
+  constructor(loader: () => Promise<WithId<T>[]>) {
+    this._loader = loader;
+  }
+
+  private async ensureLoaded() {
+    if (!this._docs) {
+      this._docs = await this._loader();
+      this._index = 0;
+    }
+  }
+
+  public async next(): Promise<WithId<T> | null> {
+    await this.ensureLoaded();
+    if (this._docs && this._index < this._docs.length) {
+      return this._docs[this._index++];
+    }
+    return null;
+  }
+
+  public async toArray(): Promise<WithId<T>[]> {
+    await this.ensureLoaded();
+    if (!this._docs) return [];
+    const remaining = this._docs.slice(this._index);
+    this._index = this._docs.length;
+    return remaining;
+  }
+
+  public async close(): Promise<void> {
+    this._closed = true;
+  }
+
+  public async hasNext(): Promise<boolean> {
+    await this.ensureLoaded();
+    return !this._closed && !!this._docs && this._index < this._docs.length;
+  }
+
+  public async *[Symbol.asyncIterator](): AsyncGenerator<WithId<T>, void, unknown> {
+    let doc;
+    while ((doc = await this.next()) !== null) {
+      yield doc;
+    }
   }
 }

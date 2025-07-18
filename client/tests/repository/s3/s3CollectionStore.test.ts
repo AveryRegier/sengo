@@ -38,14 +38,14 @@ describe('S3CollectionStore', () => {
     s3sim.putObject(`${collection}/data/abc123.json`, JSON.stringify(doc));
     const store = new S3CollectionStore(collection, bucket, opts);
     (store as any).s3 = s3Client;
-    const found = await store.find({ _id: 'abc123' }).toArray();
+    const found = await store.findCandidates({ _id: 'abc123' });
     expect(found).toEqual([doc]);
   });
 
   it('should return [] if document not found by _id', async () => {
     const store = new S3CollectionStore(collection, bucket, opts);
     (store as any).s3 = s3Client;
-    const found = await store.find({ _id: 'notfound' }).toArray();
+    const found = await store.findCandidates({ _id: 'notfound' });
     expect(found).toEqual([]);
   });
 
@@ -89,7 +89,7 @@ describe('S3CollectionStore', () => {
     const store = new S3CollectionStore(collection, bucket, opts);
     await store.close();
     await expect(store.replaceOne({ _id: 'fuzzy' }, { _id: 'fuzzy', name: 'fuzzy' })).rejects.toThrow('Store is closed');
-    expect(() => store.find({ _id: 'abc' })).toThrow('Store is closed');
+    await expect(store.findCandidates({ _id: 'abc' })).rejects.toThrow('Store is closed');
   });
 
   it('can insert and delete a document by _id', async () => {

@@ -30,7 +30,7 @@ describe('SengoClient basic API', () => {
     const collection = client.db().collection('animals');
     await collection.insertOne({ name: 'test', kind: 'cat' });
     await client.close();
-    expect(() => collection.find({})).toThrow('Store is closed');
+    await expect(collection.find({}).toArray()).rejects.toThrow ('Store is closed');
   });
 });
 

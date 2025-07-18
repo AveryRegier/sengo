@@ -145,26 +145,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     return bestIndex;
   }
 
-  find(query: Record<string, any>): FindCursor<WithId<T>> {
-    if (this.closed) throw new MongoClientClosedError('Store is closed');
-    // Return a FindCursor that will fetch the results lazily
-    return new S3FindCursor<WithId<T>>(() => this.findFilterSort(query));
-  }
-
-  private async findFilterSort(query: Record<string, any>): Promise<WithId<T>[]> {
-    return this.findCandidates(query).then(async results => {
-      return results.filter((parsed: Record<string, any>) => {
-        if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
-          if (Object.entries(query).every(([k, v]) => match(parsed, k, v))) {
-            return true;
-          }
-        }
-        return false;
-      });
-    });
-  }
-
-  private async findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
+  public async findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (query._id) {
       const doc = await this.loadById(query._id);
@@ -329,16 +310,6 @@ export class MongoNetworkError extends Error {
   }
 }
 
-function match(parsed: Record<string, any>, k: string, v: any): unknown {
-  const foundValue = parsed[k];
-  if(v) {
-    if(v.$in) {
-      return v.$in.includes(foundValue);
-    }
-  }
-  return foundValue?.toString() === v?.toString();
-}
-
 async function getBodyAsString(result: GetObjectCommandOutput): Promise<string> {
   const stream = result.Body as Readable;
   const data = await new Promise<string>((resolve, reject) => {
@@ -348,55 +319,4 @@ async function getBodyAsString(result: GetObjectCommandOutput): Promise<string> 
     stream.on('error', reject);
   });
   return data;
-}
-
-
-class S3FindCursor<T> implements FindCursor<T> {
-  private _docs: WithId<T>[] | undefined;
-  private _index: number = 0;
-  private _closed: boolean = false;
-  private _loader: () => Promise<WithId<T>[]>;
-
-  constructor(loader: () => Promise<WithId<T>[]>) {
-    this._loader = loader;
-  }
-
-  private async ensureLoaded() {
-    if (!this._docs) {
-      this._docs = await this._loader();
-      this._index = 0;
-    }
-  }
-
-  public async next(): Promise<WithId<T> | null> {
-    await this.ensureLoaded();
-    if (this._docs && this._index < this._docs.length) {
-      return this._docs[this._index++];
-    }
-    return null;
-  }
-
-  public async toArray(): Promise<WithId<T>[]> {
-    await this.ensureLoaded();
-    if (!this._docs) return [];
-    const remaining = this._docs.slice(this._index);
-    this._index = this._docs.length;
-    return remaining;
-  }
-
-  public async close(): Promise<void> {
-    this._closed = true;
-  }
-
-  public async hasNext(): Promise<boolean> {
-    await this.ensureLoaded();
-    return !this._closed && !!this._docs && this._index < this._docs.length;
-  }
-
-  public async *[Symbol.asyncIterator](): AsyncGenerator<WithId<T>, void, unknown> {
-    let doc;
-    while ((doc = await this.next()) !== null) {
-      yield doc;
-    }
-  }
 }

@@ -40,12 +40,12 @@ describe('MemoryCollectionStore', () => {
     const doc = { _id: 'del1', foo: 123 };
     await store.replaceOne({ _id: doc._id }, doc);
     // Confirm present
-    let found = await store.find({ _id: doc._id }).toArray();
+    let found = await store.findCandidates({ _id: doc._id });
     expect(found.length).toBe(1);
     // Delete
     await store.deleteOne(doc);
     // Should be gone
-    found = await store.find({ _id: doc._id }).toArray();
+    found = await store.findCandidates({ _id: doc._id });
     expect(found.length).toBe(0);
   });
 });

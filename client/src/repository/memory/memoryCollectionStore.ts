@@ -41,20 +41,24 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
   }
 
-  find(query: Record<string, any>): FindCursor<WithId<T>> {
+  findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
     this.checkClosure();
-    const results = this.documents.filter(doc => {
-      return Object.entries(query).every(([k, v]) => {
-        if (typeof v === 'object' && v !== null && '$in' in v) {
-          // $in operator support
-          return v.$in.includes(doc[k]);
-        } else {
-          return doc[k]?.toString() === v?.toString();
-        }
-      });
-    });
-    return new ConsumingArrayCursor<WithId<T>>(results);
+    return Promise.resolve(this.documents.map(a=>a) as WithId<T>[]);
   }
+  // find(query: Record<string, any>): FindCursor<WithId<T>> {
+  //   this.checkClosure();
+  //   const results = this.documents.filter(doc => {
+  //     return Object.entries(query).every(([k, v]) => {
+  //       if (typeof v === 'object' && v !== null && '$in' in v) {
+  //         // $in operator support
+  //         return v.$in.includes(doc[k]);
+  //       } else {
+  //         return doc[k]?.toString() === v?.toString();
+  //       }
+  //     });
+  //   });
+  //   return new ConsumingArrayCursor<WithId<T>>(results);
+  // }
 
   updateOne(filter: Record<string, any>, doc: Record<string, any>) {
     this.checkClosure();
