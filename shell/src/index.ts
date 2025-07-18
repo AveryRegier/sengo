@@ -84,7 +84,12 @@ class HelpCommand implements ShellCommand {
     if (shell.currentCollection) {
       const proto = Object.getPrototypeOf(shell.currentCollection);
       const methodNames = Object.getOwnPropertyNames(proto)
-        .filter(name => typeof shell.currentCollection[name] === 'function' && name !== 'constructor');
+        .filter(
+          name =>
+            typeof shell.currentCollection[name] === 'function' &&
+            name !== 'constructor' &&
+            !name.startsWith('_') // Only public methods
+        );
       if (methodNames.length) {
         console.log('\nCollection methods:');
         for (const name of methodNames) {

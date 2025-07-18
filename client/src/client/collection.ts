@@ -42,10 +42,10 @@ export class SengoCollection<T> {
 
   find(query: Record<string, any>): FindCursor<WithId<T>> {
     // Return a FindCursor that will fetch the results lazily
-    return new LoadCursor<WithId<T>>(() => this.findFilterSort(query));
+    return new LoadCursor<WithId<T>>(() => this._findFilterSort(query));
   }
 
-  private async findFilterSort(query: Record<string, any>): Promise<WithId<T>[]> {
+  private async _findFilterSort(query: Record<string, any>): Promise<WithId<T>[]> {
     return this.store.findCandidates(query).then(async results => {
       return results.filter((parsed: Record<string, any>) => {
         if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
