@@ -134,6 +134,9 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
   const foundValue = parsed[k];
   if(v) {
     if(v.$in) {
+      if(Array.isArray(foundValue)) {
+        return v.$in.some((item: unknown) => foundValue.includes(item));
+      }
       return v.$in.includes(foundValue);
     }
   }

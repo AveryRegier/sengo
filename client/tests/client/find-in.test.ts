@@ -11,6 +11,7 @@ type TestDoc = {
   name: string;
   age: number;
   city: string;
+  tags: string[];
 };
 
 describe('SengoCollection $in operator support', () => {
@@ -35,6 +36,7 @@ describe('SengoCollection $in operator support', () => {
         name: chance.name(),
         age: chance.age(),
         city: chance.city(),
+        tags: chance.unique(chance.word, 3) // Ensure unique tags
       };
       const result = await collection.insertOne(doc);
       docs.push({ ...doc, _id: result.insertedId });
@@ -48,6 +50,14 @@ describe('SengoCollection $in operator support', () => {
     expect(found.length).toBe(3);
     expect(found.map(d => d.name).sort()).toEqual(names.sort());
   });
+
+  it('finds documents using $in operator in array', async () => {
+    // Pick 3 random tags from inserted docs
+    const tags = docs.slice(0, 3).map(d => chance.pickone(d.tags));
+    const found = await collection.find({ tags: { $in: tags } }).toArray();
+    expect(found.length).toBe(3);
+  });
+
 
   it('finds documents using $in operator after creating an index', async () => {
     // Pick 3 random names from inserted docs
