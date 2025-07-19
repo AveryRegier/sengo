@@ -1,4 +1,6 @@
+import { Chance } from 'chance';
 import { Readable } from 'stream';
+const chance = new Chance();
 
 export class S3BucketSimulator {
   /** Short hash for debug output, unique per instance */
@@ -203,25 +205,25 @@ export class S3BucketSimulator {
    * Returns S3-like responses or dummy values for unknown commands.
    * Supports both AWS SDK command instances and plain objects with a .type property.
    */
-  handleCommand(cmd: any): any {
+  handleCommand(cmd: any): Promise<any> {
     // Prefer .type property (plain-object mock), fallback to constructor name
     const type = cmd?.type || cmd?.constructor?.name;
     switch (type) {
       case 'PutObjectCommand':
         this.putObject(cmd);
-        return { ETag: 'dummy-etag' };
+        return Promise.resolve({ ETag: chance.guid() }); // Simulate ETag response
       case 'GetObjectCommand':
-        return this.getObject(cmd);
+        return Promise.resolve(this.getObject(cmd));
       case 'DeleteObjectCommand':
-        return this.deleteObject(cmd);
+        return Promise.resolve(this.deleteObject(cmd));
       case 'ListObjectsV2Command':
         // Always return { Contents: [...] }
-        return this.listObjectsV2(cmd);
+        return Promise.resolve(this.listObjectsV2(cmd)) ;
       default:
         // Unknown command: mimic S3 by returning an empty object
         // eslint-disable-next-line no-console
         console.warn('S3BucketSimulator: Unknown command', type, cmd);
-        return {};
+        return Promise.resolve({});
     }
   }
 }
