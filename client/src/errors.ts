@@ -5,10 +5,14 @@
  * Base MongoDB error class for Sengo. All MongoDB errors inherit from this.
  */
 export class MongoError extends Error {
-  code?: string | number
-  constructor(message?: string) {
+  code?: string | number;
+  cause?: Error;
+  constructor(message?: string, options?: { cause?: Error }) {
     super(message);
     this.name = 'MongoError';
+    if (options?.cause) {
+      this.cause = options.cause;
+    } 
   }
 }
 
@@ -16,8 +20,8 @@ export class MongoError extends Error {
  * Error thrown for network-related issues.
  */
 export class MongoNetworkError extends MongoError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoNetworkError';
   }
 }
@@ -26,8 +30,8 @@ export class MongoNetworkError extends MongoError {
  * Error thrown when a timeout occurs.
  */
 export class MongoTimeoutError extends MongoNetworkError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoTimeoutError';
   }
 }
@@ -36,8 +40,8 @@ export class MongoTimeoutError extends MongoNetworkError {
  * Error thrown when a command or feature is not implemented.
  */
 export class MongoNotImplementedError extends MongoError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoNotImplementedError';
   }
 }
@@ -47,8 +51,8 @@ export class MongoNotImplementedError extends MongoError {
  * Parent for e.g. MongoBulkWriteError.
  */
 export class MongoServerError extends MongoError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoServerError';
   }
 }
@@ -57,8 +61,8 @@ export class MongoServerError extends MongoError {
  * Error thrown for bulk write operations (e.g., when one or more writes fail in a bulk operation).
  */
 export class MongoBulkWriteError extends MongoServerError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoBulkWriteError';
   }
 }
@@ -68,8 +72,8 @@ export class MongoBulkWriteError extends MongoServerError {
  * Parent for MongoInvalidArgumentError, MongoParseError, MongoClientClosedError.
  */
 export class MongoClientError extends MongoError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoClientError';
   }
 }
@@ -78,8 +82,8 @@ export class MongoClientError extends MongoError {
  * Error thrown when an operation is attempted on a closed client.
  */
 export class MongoClientClosedError extends MongoClientError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoClientClosedError';
   }
 }
@@ -88,8 +92,8 @@ export class MongoClientClosedError extends MongoClientError {
  * Error thrown when an invalid argument is provided to a MongoDB method.
  */
 export class MongoInvalidArgumentError extends MongoClientError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoInvalidArgumentError';
   }
 }
@@ -98,8 +102,8 @@ export class MongoInvalidArgumentError extends MongoClientError {
  * Error thrown when a parsing error occurs (e.g., invalid connection string).
  */
 export class MongoParseError extends MongoClientError {
-  constructor(message?: string) {
-    super(message);
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
     this.name = 'MongoParseError';
   }
 }

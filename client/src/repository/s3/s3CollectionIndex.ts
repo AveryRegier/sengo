@@ -1,6 +1,5 @@
 import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
-import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex, IndexEntry } from '../collectionIndex';
 import { MongoNetworkError } from './s3CollectionStore';
 
@@ -55,56 +54,6 @@ export class S3CollectionIndex extends BaseCollectionIndex {
 
   public getIndexMap(): Map<string, IndexEntry> {
     return this.indexEntryCache;
-  }
-
-  /**
-   * Remove a document ID from all index keys in memory and persist changes.
-   * This is used for deleteOneById to ensure the ID is removed from all index entries.
-   * @param id Document _id to remove
-   */
-  /**
-   * Remove a document ID from all relevant index entry files (for this index).
-   * Only loads the entry files that could contain the ID, based on the index key spec.
-   * @param id Document _id to remove
-   * @param doc (optional) The full document, if available, to compute the key(s) directly.
-   */
-  public async removeIdFromAllKeys(id: string, doc?: Record<string, any>): Promise<void> {
-    const idStr = id.toString();
-    // If doc is provided, we can compute the key directly
-    if (doc) {
-      const key = this.makeIndexKey(doc);
-      let entry = await this.fetch(key);
-      if (entry.ids.has(idStr)) {
-        entry.ids.delete(idStr);
-        entry.dirty = true;
-        await this.persist(key, entry);
-      }
-      return;
-    }
-    // If doc is not provided, we must check all loaded entries (fallback)
-    for (const [key, entry] of this.indexEntryCache.entries()) {
-      if (entry.ids.has(idStr)) {
-        entry.ids.delete(idStr);
-        entry.dirty = true;
-        await this.persist(key, entry);
-        // Always update the cache to the current entry object
-        this.indexEntryCache.set(key, entry);
-      }
-    }
-  }
-
-    /**
-   * Remove a document from the index for the appropriate key.
-   * Fetches from S3 if entry is not in memory, removes ID, and persists if needed.
-   * @param doc Document to remove
-   */
-  async removeDocument(doc: Record<string, any>): Promise<void> {
-    await super.removeDocument(doc);
-    const key = this.makeIndexKey(doc);
-    const entry = await this.fetch(key);
-    if (entry && entry.dirty) {
-      await this.persist(key, entry);
-    }
   }
 
   /**
@@ -192,7 +141,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param key Index key
    * @param entry IndexEntry to persist
    */
-  async persist(key: string, entry: IndexEntry): Promise<void> {
+  protected async persist(key: string, entry: IndexEntry): Promise<void> {
     // logger not available here; consider injecting if needed for debug
     this.indexEntryCache.set(key, entry);
     const wasEmpty = this.persistQueue.size === 0;
@@ -324,20 +273,6 @@ export class S3CollectionIndex extends BaseCollectionIndex {
     this.indexEntryCache.clear();
   }
 
-  /**
-   * Add a document to the index for the appropriate key.
-   * Fetches from S3 if entry is not in memory, merges IDs, and persists if needed.
-   * @param doc Document to add
-   */
-  async addDocument(doc: Record<string, any>): Promise<void> { 
-    if (this.hasFirstKey(doc)) {
-      const key = this.makeIndexKey(doc);
-      let entry = await this.fetch(key);
-      if (entry.add(doc._id)) {
-        await this.persist(key, entry);
-      }
-    }
-  }
 
   /**
    * Wait until all pending persist tasks are complete.

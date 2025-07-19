@@ -88,12 +88,6 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     const idx = this.documents.findIndex(d => d._id?.toString() === doc._id?.toString());
     if (idx === -1) return;
     const [removed] = this.documents.splice(idx, 1);
-    // Remove from all indexes
-    for (const index of this.indexes.values()) {
-      if (typeof index.removeDocument === 'function') {
-        await index.removeDocument(removed);
-      }
-    }
   }
 
   async close() {

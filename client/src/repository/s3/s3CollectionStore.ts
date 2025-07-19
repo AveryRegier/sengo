@@ -110,7 +110,13 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     await this.s3.send(new DeleteObjectCommand({
       Bucket: this.bucket,
       Key: key,
-    }));
+    })).catch(err => {
+      if (err.name === 'NoSuchKey') {
+        // Document not found, no action needed
+      } else {
+        throw err;
+      }
+    });
   }
 
   private id2key(id: any) {

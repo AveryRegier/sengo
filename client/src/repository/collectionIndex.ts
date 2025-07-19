@@ -7,13 +7,13 @@ export interface CollectionIndex {
   keys: NormalizedIndexKeyRecord[];
   
   addDocument(doc: Record<string, any>): Promise<void>;
+  removeDocument(doc: Record<string, any>): Promise<void>
   /**
    * Update the index for a document update. Receives the old and new document.
    * The index implementation should decide if any index maintenance is needed.
    * This method should be idempotent and safe to call for any update.
    */
   updateIndexOnDocumentUpdate(oldDoc: Record<string, any>, newDoc: Record<string, any>): Promise<void>;
-  removeIdFromAllKeys<U>(id: string, doc: Record<string, any>): unknown;
   isBusy?(): boolean;
   getStatus?(): { pendingInserts: number; runningTasks: number; avgPersistMs: number; estTimeToClearMs: number };
   flush(): Promise<void>;
@@ -76,10 +76,12 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
 
   public async addDocument(doc: Record<string, any>): Promise<void> {
     if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
-    if(this.hasFirstKey(doc)) {
+    if (this.hasFirstKey(doc)) {
       const key = this.makeIndexKey(doc);
       let entry = await this.fetch(key);
-      entry.add(doc._id.toString());
+      if (entry.add(doc._id)) {
+        await this.persist(key, entry);
+      }
     }
   }
 
@@ -105,6 +107,11 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     }, [] as string[]);
   }
 
+  protected async persist(key: string, entry: IndexEntry): Promise<void> {
+    // Default implementation does nothing, subclasses should override
+    // to add persistence logic (e.g. to a database or file)
+  }
+
   public async flush(): Promise<void> {
     // No async persistence in memory, so just resolve immediately
     return;
@@ -123,6 +130,10 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     if (entry.ids.has(idStr)) {
       entry.ids.delete(idStr);
       entry.dirty = true;
+    }
+
+    if (entry && entry.dirty) {
+      await this.persist(key, entry);
     }
   }
   abstract findIdsForKey(key: string): Promise<string[]>;

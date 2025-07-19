@@ -99,13 +99,20 @@ export class SengoCollection<T> {
     }
     const docId = found._id;
     // Call the store to delete by _id
-    await this.store.deleteOne(found);
-    
-    // Remove from all indexes
-    for (const [name, index] of await this.store.getIndexes()) {
-      this.logger.debug({ name, doc: found }, 'Removing doc from index');
-      await index.removeIdFromAllKeys(found._id?.toString(), found);
-    }
+    await this.store.deleteOne(found).then(async () => {
+      // Index maintenance: let each index handle the update logic
+      for (const [name, index] of await this.store.getIndexes()) {
+        this.logger.debug({ name, doc: found }, 'Removing doc in index');
+        await index.removeDocument(found);
+      }
+    }).catch(err => {
+      if (err.name === 'NoSuchKey') {
+        return { deletedCount: 0 }; // Document not found, no action needed
+      } else {
+        this.logger.error({ err }, 'Error deleting document');
+        throw new MongoServerError('Failed to delete document', { cause: err });
+      }
+    });
     return { deletedCount: 1 };
   }
 
