@@ -105,13 +105,14 @@ export class S3CollectionIndex extends BaseCollectionIndex {
     let tryCount = 0;
     while (tryCount < 3) {
       try {
-        await this.s3.send(new PutObjectCommand({
+        const results = await this.s3.send(new PutObjectCommand({
           Bucket: this.bucket,
           Key: s3Key,
           Body: JSON.stringify(entry.toArray()),
           ContentType: 'application/json',
           ...(entry.etag ? { IfMatch: entry.etag } : {}),
         }));
+        entry.etag = results.ETag; // Update etag on success
         entry.dirty = false;
       // logger not available here; consider injecting if needed for debug
         return;
@@ -119,6 +120,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         // logger not available here; consider injecting if needed for debug
         if (err.$metadata && err.$metadata.httpStatusCode === 412) {
           // ETag mismatch, refetch and retry
+          this.indexEntryCache.delete(key); // Clear cache to force refetch
           const fresh = await this.fetch(key);
           entry.ids = new Set([...entry.ids, ...fresh.ids]);
           entry.etag = fresh.etag;
@@ -221,38 +223,12 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   }
 
   /**
-   * Lazily load index entry for a key from S3 at most once per key (per process).
-   * If not found, returns an empty IndexEntry.
-   * Throws MongoNetworkError on network errors.
-   * @param key Index key
-   */
-  async getIndexEntryForKey(key: string): Promise<IndexEntry> {
-    if (this.indexEntryCache.has(key)) {
-      return this.indexEntryCache.get(key)!;
-    }
-    try {
-      const entry = await this.fetch(key);
-      this.indexEntryCache.set(key, entry);
-      return entry;
-    } catch (err: any) {
-      if (err && (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message))) {
-        throw new MongoNetworkError(err.message || 'Network error');
-      }
-      if (typeof err === 'string') {
-        throw new MongoNetworkError(err);
-      }
-      // Always return an IndexEntry, never throw for not found
-      return new IndexEntry();
-    }
-  }
-
-  /**
    * Find document IDs for a given index key (loads index entry file at most once per key).
    * @param key Index key
    */
   async findIdsForKey(key: string): Promise<string[]> {
     try {
-      const entry = await this.getIndexEntryForKey(key);
+      const entry = await this.fetch(key);
       // logger not available here; consider injecting if needed for debug
       return entry.toArray();
     } catch (err: any) {

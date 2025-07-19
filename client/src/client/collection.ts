@@ -124,7 +124,7 @@ export class SengoCollection<T> {
     const index = await this.store.createIndex(fields || 'default_index', normalizedKeys);
     // Build the index here (assume contract is always fulfilled)
     this.logger.debug({ index: fields || 'default_index' }, 'Calling this.store.find({}) after index creation');
-    const allDocs = await this.find({});
+    const allDocs = this.find({});
     if(await allDocs.hasNext()) {
       do {
         const doc = await allDocs.next();

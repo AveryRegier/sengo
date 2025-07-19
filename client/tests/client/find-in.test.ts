@@ -68,4 +68,11 @@ describe('SengoCollection $in operator support', () => {
     expect(found.map(d => d.name).sort()).toEqual(names.sort());
   });
 
+  it('finds documents using $in operator in array after creating an index', async () => {
+    // Pick 3 random tags from inserted docs
+    const indexName = await collection.createIndex({ tags: 1 });
+    const tags = docs.slice(0, 3).map(d => chance.pickone(d.tags));
+    const found = await collection.find({ tags: { $in: tags } }).toArray();
+    expect(found.length).toBe(3);
+  });
 });

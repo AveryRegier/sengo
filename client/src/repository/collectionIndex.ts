@@ -1,5 +1,5 @@
 import { IndexDefinition, IndexKeyRecord, Order } from "../types";
-import { MongoInvalidArgumentError } from '../errors.js';
+import { MongoInvalidArgumentError, MongoServerError } from '../errors.js';
 import { NormalizedIndexKeyRecord } from ".";
 
 export interface CollectionIndex {
@@ -34,6 +34,15 @@ export class IndexEntry {
   public add(id: string): boolean {
     if (!this.ids.has(id)) {
       this.ids.add(id);
+      this.dirty = true;
+      return true;
+    }
+    return false;
+  }
+
+  public remove(id: string): boolean {
+    if (this.ids.has(id)) {
+      this.ids.delete(id);
       this.dirty = true;
       return true;
     }
@@ -75,21 +84,45 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   public async addDocument(doc: Record<string, any>): Promise<void> {
-    if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
-    if (this.hasFirstKey(doc)) {
-      const key = this.makeIndexKey(doc);
-      let entry = await this.fetch(key);
-      if (entry.add(doc._id)) {
-        await this.persist(key, entry);
-      }
-    }
+    return await this.changeIndex(doc,  (entry, id) => entry.add(id));
+  }
+  
+  /**
+   * Remove a document from the index for the appropriate key.
+   * Subclasses may override to add persistence or other side effects.
+   */
+  public async removeDocument(doc: Record<string, any>): Promise<void> {
+    return await this.changeIndex(doc, (entry, id) => entry.remove(id));
   }
 
-  public makeIndexKey(doc: Record<string, any>): string {
-    // Only use the field values, not the order or field name, for the key
-    // For a single key: { foo: 1 } => '1'
-    // For multiple keys: { foo: 1, bar: -1 } => '1|-1'
-    return this.keys.map(k => `${doc[k.field] ?? ''}`).join('|');
+  private async changeIndex(doc: Record<string, any>, fn: (entry: IndexEntry, id: string) => boolean) {
+    if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
+    const id = doc._id.toString();
+    if (!this.hasFirstKey(doc)) {
+      // If the first key is not set, we don't index this document
+      return;
+    }
+    const allTheKeys = this.makeAllIndexKeys(doc);
+    const results = await Promise.allSettled(
+      allTheKeys.map(key => this.changeSpecifiIndex(key, id, fn))
+    );
+    // Handle results if needed
+    const errors = results.filter(r => r.status === 'rejected').map(r => (r as PromiseRejectedResult).reason);
+    if (errors.length) {
+      throw new MongoServerError(`Failed to update index for keys: ${errors.map(e => e.message).join(', ')}`,  { cause: errors[0] });
+    }
+    return void 0;
+  }
+
+  private async changeSpecifiIndex(key: string, id: string, fn: (entry: IndexEntry, id: string) => boolean) {
+    let entry = await this.fetch(key);
+    if (entry) {
+      fn(entry, id);
+    }
+
+    if (entry && entry.dirty) {
+      await this.persist(key, entry);
+    }
   }
 
   public findKeysForQuery(query: Record<string, any>): string[] {
@@ -107,6 +140,38 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     }, [] as string[]);
   }
 
+  public makeAllIndexKeys(query: Record<string, any>): string[] {
+    // Find keys that match the query
+    const validKeys: NormalizedIndexKeyRecord[] = [];
+    // we have to stop the key generation once any field is not defined
+    this.keys.forEach(key => {
+      const valueToFind = query[key.field];
+      if (valueToFind !== undefined) {
+        if(Array.isArray(valueToFind)) {
+          if(valueToFind.length > 0) {
+            validKeys.push(key);
+          }
+        } else {
+          validKeys.push(key);
+        }
+      }
+    });
+
+    return validKeys.reduce((acc, key) => {
+      const valueToFind = query[key.field];
+      let newKeys: string[] = [];
+      if (Array.isArray(valueToFind)) {
+        newKeys = valueToFind.map((v: string) => `${v}`);
+      } else {
+        newKeys = [`${valueToFind}`];
+      }
+      if (acc.length === 0) {
+        return newKeys;
+      }
+      return newKeys.map((v: string) => acc.map((current: string) => `${current}|${key.field}`)).flat();
+    }, [] as string[]);
+  }
+
   protected async persist(key: string, entry: IndexEntry): Promise<void> {
     // Default implementation does nothing, subclasses should override
     // to add persistence logic (e.g. to a database or file)
@@ -118,24 +183,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   // --- Abstract methods (must be implemented by subclass) ---
-  /**
-   * Remove a document from the index for the appropriate key.
-   * Subclasses may override to add persistence or other side effects.
-   */
-  public async removeDocument(doc: Record<string, any>): Promise<void> {
-    if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
-    const key = this.makeIndexKey(doc);
-    let entry = await this.fetch(key);
-    const idStr = doc._id.toString();
-    if (entry.ids.has(idStr)) {
-      entry.ids.delete(idStr);
-      entry.dirty = true;
-    }
 
-    if (entry && entry.dirty) {
-      await this.persist(key, entry);
-    }
-  }
   abstract findIdsForKey(key: string): Promise<string[]>;
 
   // --- Protected methods ---
