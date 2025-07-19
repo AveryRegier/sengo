@@ -101,7 +101,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   async removeDocument(doc: Record<string, any>): Promise<void> {
     await super.removeDocument(doc);
     const key = this.makeIndexKey(doc);
-    const entry = this.indexEntryCache.get(key);
+    const entry = await this.fetch(key);
     if (entry && entry.dirty) {
       await this.persist(key, entry);
     }
@@ -332,13 +332,10 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   async addDocument(doc: Record<string, any>): Promise<void> { 
     if (this.hasFirstKey(doc)) {
       const key = this.makeIndexKey(doc);
-      // Always use the same object as is in the cache, if present
       let entry = await this.fetch(key);
       if (entry.add(doc._id)) {
         await this.persist(key, entry);
       }
-      // Always update the cache to the current entry object
-      this.indexEntryCache.set(key, entry);
     }
   }
 

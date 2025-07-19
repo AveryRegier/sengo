@@ -65,9 +65,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
    */
   public async updateIndexOnDocumentUpdate(oldDoc: Record<string, any>, newDoc: Record<string, any>): Promise<void> {
     // Only call removeDocument if oldDoc has an _id
-    const oldKey = this.makeIndexKey(oldDoc);
-    const newKey = this.makeIndexKey(newDoc);
-    if (oldDoc && oldDoc._id && oldKey !== newKey && typeof (this.removeDocument) === 'function') {
+    if (oldDoc && oldDoc._id) {
       await this.removeDocument(oldDoc);
     }
     await this.addDocument(newDoc).finally(() => {
