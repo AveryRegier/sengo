@@ -11,6 +11,7 @@ export class S3BucketSimulator {
   private indexAccessLog: string[] = [];
   private documentAccessLog: string[] = [];
   private getObjectCallCount: Record<string, number> = {};
+  private etags: Record<string, string> = {}; // Store ETags for each file
 
   constructor() {
     // Allow external override for deterministic test output
@@ -112,6 +113,7 @@ export class S3BucketSimulator {
     if (!key) throw new Error('putObject: missing key');
     if (b === undefined) throw new Error('putObject: missing body');
     this.files[key] = b;
+    this.etags[key] = chance.guid(); // Generate a new ETag for the file
     // Log all index/document file writes
     if (key.includes('/indices/')) {
       this.indexAccessLog.push(key);
@@ -120,6 +122,7 @@ export class S3BucketSimulator {
     }
     // For backward compatibility
     this.accessLog.push(key);
+    return { ETag: this.etags[key] }; // Return the ETag in the response
   }
 
   getObject(keyOrCmd: string | any) {
@@ -136,7 +139,19 @@ export class S3BucketSimulator {
     this.getObjectCallCount[key] = (this.getObjectCallCount[key] || 0) + 1;
     if (!(key in this.files)) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
     return {
-      Body: Readable.from([this.files[key]])
+      Body: Readable.from([this.files[key]]),
+      ETag: this.etags[key], // Include the ETag in the response
+    };
+  }
+
+  headObject(keyOrCmd: string | any) {
+    const key = typeof keyOrCmd === 'string' ? keyOrCmd : S3BucketSimulator.extractKey(keyOrCmd);
+    if (!key) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
+    
+    if (!(key in this.files)) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
+    return {
+      ContentLength: this.files[key].length,
+      ETag: this.etags[key], // Include the ETag in the response
     };
   }
 
@@ -153,11 +168,13 @@ export class S3BucketSimulator {
     this.accessLog.push(key);
     const existed = key in this.files;
     delete this.files[key];
+    delete this.etags[key]; // Remove the ETag for the deleted file
     return { DeleteMarker: existed };
   }
 
   clear() {
     this.files = {};
+    this.etags = {}; // Clear ETags
     this.accessLog = [];
     this.indexAccessLog = [];
     this.documentAccessLog = [];
@@ -190,10 +207,10 @@ export class S3BucketSimulator {
    * Simulate AWS S3 ListObjectsV2Command response.
    * Returns { Contents: [{ Key }] } or { Contents: [] }.
    */
-  listObjectsV2(prefixOrCmd: string | any = ''): { Contents: { Key: string }[] } {
+  listObjectsV2(prefixOrCmd: string | any = ''): { Contents: { Key: string; ETag: string }[] } {
     const prefix = typeof prefixOrCmd === 'string' ? prefixOrCmd : S3BucketSimulator.extractPrefix(prefixOrCmd);
     const keys = this.listObjects(prefix);
-    return { Contents: keys.map(Key => ({ Key })) };
+    return { Contents: keys.map(Key => ({ Key, ETag: this.etags[Key] })) }; // Include ETags in the response
   }
 
   getFile(key: string) {
@@ -210,15 +227,16 @@ export class S3BucketSimulator {
     const type = cmd?.type || cmd?.constructor?.name;
     switch (type) {
       case 'PutObjectCommand':
-        this.putObject(cmd);
-        return Promise.resolve({ ETag: chance.guid() }); // Simulate ETag response
+        return Promise.resolve(this.putObject(cmd));
       case 'GetObjectCommand':
         return Promise.resolve(this.getObject(cmd));
       case 'DeleteObjectCommand':
         return Promise.resolve(this.deleteObject(cmd));
       case 'ListObjectsV2Command':
         // Always return { Contents: [...] }
-        return Promise.resolve(this.listObjectsV2(cmd)) ;
+        return Promise.resolve(this.listObjectsV2(cmd));
+      case 'HeadObjectCommand':
+        return Promise.resolve(this.headObject(cmd));
       default:
         // Unknown command: mimic S3 by returning an empty object
         // eslint-disable-next-line no-console

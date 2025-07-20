@@ -6,7 +6,8 @@ import { S3BucketSimulator } from './S3BucketSimulator';
 import {
   PutObjectCommand,
   GetObjectCommand,
-  ListObjectsV2Command
+  ListObjectsV2Command,
+  HeadObjectCommand
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 import { Chance } from 'chance';
@@ -82,25 +83,7 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
   // Refactored: create a single simulator per test, but allow multiple stores/log containers
   function makeStoreWithSim(s3sim: S3BucketSimulator) {
     const sendMock = vi.fn(async (cmd: any) => {
-      // Debug output for every S3 command
-      // eslint-disable-next-line no-console
-      console.log(`[sim ${s3sim._debugHash}] DEBUG sendMock called with:`, cmd && cmd.constructor && cmd.constructor.name, cmd && cmd.input && cmd.input.Key);
-      if (cmd instanceof PutObjectCommand) {
-        await new Promise(res => setTimeout(res, 1));
-        s3sim.putObject(cmd.input.Key!, String(cmd.input.Body));
-        return {};
-      }
-      if (cmd instanceof GetObjectCommand) {
-        return s3sim.getObject(cmd.input.Key!);
-      }
-      if (cmd instanceof ListObjectsV2Command) {
-        return s3sim.listObjectsV2(cmd.input.Prefix);
-      }
-      // Add DeleteObjectCommand support
-      if (cmd.constructor && cmd.constructor.name === 'DeleteObjectCommand') {
-        return s3sim.deleteObject(cmd.input.Key!);
-      }
-      throw new Error('Unknown command: ' + cmd.constructor.name);
+      return s3sim.handleCommand(cmd);
     });
     const store = new S3CollectionStore(collection, bucket);
     // @ts-ignore

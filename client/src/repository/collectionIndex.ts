@@ -24,6 +24,8 @@ export class IndexEntry {
   etag?: string;
   loadedAt: number;
   dirty: boolean = false;
+  added: Set<string> | undefined = undefined;
+  removed: Set<string> | undefined = undefined;
 
   constructor(ids: string[] = [], etag?: string) {
     this.ids = new Set(ids);
@@ -34,6 +36,10 @@ export class IndexEntry {
   public add(id: string): boolean {
     if (!this.ids.has(id)) {
       this.ids.add(id);
+      if (!this.added) {
+        this.added = new Set();
+      }
+      this.added.add(id);
       this.dirty = true;
       return true;
     }
@@ -43,10 +49,23 @@ export class IndexEntry {
   public remove(id: string): boolean {
     if (this.ids.has(id)) {
       this.ids.delete(id);
+      if (!this.removed) {
+        this.removed = new Set();
+      }
+      this.removed.add(id);
       this.dirty = true;
       return true;
     }
     return false;
+  }
+
+  public update(newIds: string[], etag?: string): void {
+    this.ids = new Set(newIds);
+    this.etag = etag || this.etag;
+    this.loadedAt = Date.now();
+
+    this.added?.forEach(id => this.ids.add(id));
+    this.removed?.forEach(id => this.ids.delete(id));
   }
 
   public toArray(): string[] {
@@ -168,7 +187,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
       if (acc.length === 0) {
         return newKeys;
       }
-      return newKeys.map((v: string) => acc.map((current: string) => `${current}|${key.field}`)).flat();
+      return newKeys.map((v: string) => acc.map((current: string) => `${current}|${v}`)).flat();
     }, [] as string[]);
   }
 

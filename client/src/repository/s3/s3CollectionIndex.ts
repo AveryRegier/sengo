@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 import { BaseCollectionIndex, IndexEntry } from '../collectionIndex';
 import { MongoNetworkError } from './s3CollectionStore';
@@ -62,13 +62,24 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param key Index key
    */
   protected async fetch(key: string): Promise<IndexEntry> {
-    if( this.indexEntryCache.has(key)) {
-      return this.indexEntryCache.get(key)!; // Return cached entry if available
-    }
-    // key is now just the value(s) of the indexed field(s), already encoded by makeIndexKey
-    // Do NOT re-encode here; just use as-is to match file naming in tests and production
-    const s3Key = `${this.collectionName}/indices/${this.name}/${key}.json`;
+
     try {
+      // key is now just the value(s) of the indexed field(s), already encoded by makeIndexKey
+      // Do NOT re-encode here; just use as-is to match file naming in tests and production  
+      const encodedKey = key.split('|').map(v => encodeURIComponent(v)).join('|');
+      const s3Key = `${this.collectionName}/indices/${this.name}/${encodedKey}.json`;
+      
+      let cachedEntry = this.indexEntryCache.get(key);
+      if (cachedEntry?.etag) {
+        const result = await this.s3.send(new HeadObjectCommand({
+          Bucket: this.bucket,
+          Key: s3Key,
+        }));
+        if( result.ETag == cachedEntry.etag) {
+          return cachedEntry; // Return cached entry if available
+        }
+      }
+
       const result = await this.s3.send(new GetObjectCommand({
         Bucket: this.bucket,
         Key: s3Key,
@@ -82,6 +93,11 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       });
       const ids = JSON.parse(data);
       const etag = result.ETag;
+      cachedEntry = this.indexEntryCache.get(key); // allow for late changes
+      if(cachedEntry) {
+        cachedEntry.update(Array.isArray(ids) ? ids : [], etag);
+        return cachedEntry;
+      }
       const entry = new IndexEntry(Array.isArray(ids) ? ids : [], etag);
       this.indexEntryCache.set(key, entry); // Cache the entry for future use
       return entry;
@@ -98,11 +114,10 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * @param entry IndexEntry to persist
    */
   protected async persistEntry(key: string, entry: IndexEntry): Promise<void> {
-    // key is now just the value(s) of the indexed field(s), not including order
-    // Encode each value, not the separator, to match test and MongoDB compatibility
     const encodedKey = key.split('|').map(v => encodeURIComponent(v)).join('|');
     const s3Key = `${this.collectionName}/indices/${this.name}/${encodedKey}.json`;
     let tryCount = 0;
+
     while (tryCount < 3) {
       try {
         const results = await this.s3.send(new PutObjectCommand({
@@ -114,28 +129,24 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         }));
         entry.etag = results.ETag; // Update etag on success
         entry.dirty = false;
-      // logger not available here; consider injecting if needed for debug
         return;
       } catch (err: any) {
-        // logger not available here; consider injecting if needed for debug
-        if (err.$metadata && err.$metadata.httpStatusCode === 412) {
+        if (err.$metadata?.httpStatusCode === 412) {
           // ETag mismatch, refetch and retry
-          this.indexEntryCache.delete(key); // Clear cache to force refetch
           const fresh = await this.fetch(key);
-          entry.ids = new Set([...entry.ids, ...fresh.ids]);
-          entry.etag = fresh.etag;
-          entry.dirty = true;
+          entry.update(fresh.toArray(), fresh.etag);
           tryCount++;
           continue;
         }
         throw err;
       }
     }
-    // Instead of throwing, re-queue the key at the back for another attempt
+
+    // Re-queue the key for another attempt after a delay
     setTimeout(() => {
       this.persistQueue.add(key);
       this._triggerPersist();
-    }, 1000); // small delay to avoid tight loop
+    }, 1000);
   }
 
   /**
@@ -232,6 +243,9 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       // logger not available here; consider injecting if needed for debug
       return entry.toArray();
     } catch (err: any) {
+      if( err.name === 'NoSuchKey') {
+        return []; // No such key, return empty array
+      }
       if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
         throw new MongoNetworkError(err.message || 'Network error');
       }
