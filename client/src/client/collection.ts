@@ -139,7 +139,7 @@ export class SengoCollection<T> {
 
 function match(parsed: Record<string, any>, k: string, v: any): unknown {
   const foundValue = parsed[k];
-  if(v) {
+  if(v !== undefined && v !== null) {
     if(v.$in) {
       if(Array.isArray(foundValue)) {
         return v.$in.some((item: unknown) => foundValue.includes(item));
