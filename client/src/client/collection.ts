@@ -141,7 +141,10 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
   const foundValue = parsed[k];
   if(v !== undefined && v !== null) {
     if(v.$in) {
-      if(Array.isArray(foundValue)) {
+      if(k === "_id") {
+        v.$in = v.$in.map((id: any) => id.toString());
+      }
+      if(Array.isArray(foundValue)) { 
         return v.$in.some((item: unknown) => foundValue.includes(item));
       }
       return v.$in.includes(foundValue);

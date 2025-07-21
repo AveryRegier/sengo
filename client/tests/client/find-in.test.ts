@@ -75,4 +75,12 @@ describe('SengoCollection $in operator support', () => {
     const found = await collection.find({ tags: { $in: tags } }).toArray();
     expect(found.length).toBe(3);
   });
+
+  it("find documents by _id using $in operator", async () => {
+    // Pick 3 random _ids from inserted docs
+    const ids = docs.slice(0, 3).map(d => d._id);
+    const found = await collection.find({ _id: { $in: ids } }).toArray();
+    expect(found.length).toBe(3);
+    expect(found.map(d => d._id.toString()).sort()).toEqual(ids.map(id => id.toString()).sort());
+  })
 });

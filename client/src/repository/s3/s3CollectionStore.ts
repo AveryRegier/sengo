@@ -154,8 +154,13 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   public async findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (query._id) {
-      const doc = await this.loadById(query._id);
-      return doc ? [doc] : [];
+      const ids: string[] = [];
+      if (query._id.$in) {
+        query._id.$in.forEach((v: string) => ids.push(v));
+      } else {
+        ids.push(query._id);
+      }
+      return await this.loadTheseDocuments<T>(ids.map(this.id2key.bind(this)));
     }
     await this.ensureIndexesLoaded();
     const index = this.findBestIndex(query);
@@ -170,17 +175,6 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
     }
     return this.scan();
-  }
-
-  private async loadById(_id: any): Promise<WithId<T> | null> {
-    const key = this.id2key(_id);
-    try {
-      const record = await this.loadRecordByKey(key);
-      return record;
-    } catch (err: any) {
-      if (err.name === 'NoSuchKey') return null; // Not found
-      throw err; // Re-throw other errors
-    }
   }
 
   private async loadRecordByKey(key: string): Promise<WithId<T> | null> {
@@ -296,7 +290,14 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   }
 
   private async loadTheseDocuments<T>(keys: string[]): Promise<WithId<T>[]> {
-    const docs = await Promise.all(keys.map(key => this.loadRecordByKey(key)));
+    const docs = await Promise.all(keys.map(async key => {
+      try {
+        return await this.loadRecordByKey(key);
+      } catch (err: any) {
+        if (err.name === 'NoSuchKey') return null; // Not found
+        throw err; // Re-throw other errors
+      }
+    }))
     // Filter out nulls (not found)
     return docs.filter(doc => doc !== null) as WithId<T>[];
   }
