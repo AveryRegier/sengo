@@ -12,7 +12,9 @@ import {
   GetObjectCommandOutput
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
-import { WithId, FindCursor } from '../../types.js';
+import { WithId } from '../../types.js';
+import { getLogger } from '../../client/logger.js';
+import { get } from 'http';
 
 export interface S3CollectionStoreOptions {
   region?: string;
@@ -50,22 +52,28 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     await this.ensureIndexesLoaded();
     // Delete index metadata file
     const metaKey = `${this.collection}/indices/${name}.json`;
-    await this.s3.send(new DeleteObjectCommand({
+    const args1 = {
       Bucket: this.bucket,
       Key: metaKey,
-    }));
+    };
+    getLogger().debug(`Deleting index metadata from S3`, { command: "deleteObject", args: args1 });
+    await this.s3.send(new DeleteObjectCommand(args1));
     // List and delete all entry files under the index prefix
     const prefix = `${this.collection}/indices/${name}/`;
-    const listed = await this.s3.send(new ListObjectsV2Command({
+    const args = {
       Bucket: this.bucket,
       Prefix: prefix,
-    }));
+    };
+    getLogger().debug(`Listing objects from S3`, { command: "listObjectsV2", args });
+    const listed = await this.s3.send(new ListObjectsV2Command(args));
     if (listed.Contents) {
       for (const obj of listed.Contents) {
-        await this.s3.send(new DeleteObjectCommand({
+        const args = {
           Bucket: this.bucket,
           Key: obj.Key,
-        }));
+        };
+        getLogger().debug(`Deleting index entry from S3`, { command: "deleteObject", args });
+        await this.s3.send(new DeleteObjectCommand(args));
       }
     }
     // Remove from loadedIndexes
@@ -90,12 +98,14 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     if (!_id) throw new MongoInvalidArgumentError('replaceOne requires _id');
     const key = this.id2key(_id);
     const body = JSON.stringify(doc);
-    await this.s3.send(new PutObjectCommand({
+    const args = {
       Bucket: this.bucket,
       Key: key,
       Body: body,
       ContentType: 'application/json',
-    }));
+    };
+    getLogger().debug(`Replacing document in S3`, { command: "putObject", args });
+    await this.s3.send(new PutObjectCommand(args));
     // No MongoDB-style response here; just return void
   }
 
@@ -107,10 +117,12 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (!doc._id) throw new MongoInvalidArgumentError('deleteOne requires _id');
     const key = this.id2key(doc._id);
-    await this.s3.send(new DeleteObjectCommand({
+    const args = {
       Bucket: this.bucket,
       Key: key,
-    })).catch(err => {
+    };
+    getLogger().debug(`Deleting document from S3`, { command: "deleteObject", args });
+    await this.s3.send(new DeleteObjectCommand(args)).catch(err => {
       if (err.name === 'NoSuchKey') {
         // Document not found, no action needed
       } else {
@@ -179,10 +191,12 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   private async loadRecordByKey(key: string): Promise<WithId<T> | null> {
     try {
-      const result = await this.s3.send(new GetObjectCommand({
+      const args = {
         Bucket: this.bucket,
         Key: key,
-      }));
+      };
+      getLogger().debug(`Fetching document from S3`, { command: "getObject", args });
+      const result = await this.s3.send(new GetObjectCommand(args));
       if (!result || !result.Body) return null; //throw Object.assign(new MongoServerError('Not found'), { name: 'NoSuchKey' });
       const data = await getBodyAsString(result);
       return JSON.parse(data);
@@ -211,10 +225,12 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     const prefix = `${this.collection}/data/`;
     let listed;
     try {
-      listed = await this.s3.send(new ListObjectsV2Command({
+      const args = {
         Bucket: this.bucket,
         Prefix: prefix,
-      }));
+      };
+      getLogger().debug(`Listing objects from S3`, { command: "listObjectsV2", args });
+      listed = await this.s3.send(new ListObjectsV2Command(args));
       if (!listed || !listed.Contents) return [];
     } catch (err: any) {
       if (err.name === 'NoSuchBucket') return [];
@@ -234,12 +250,14 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     this.ensureIndexesLoaded();
     // 1. Create and persist the index metadata file
     const index = { name, keys };
-    await this.s3.send(new PutObjectCommand({
+    const args = {
       Bucket: this.bucket,
       Key: `${this.collection}/indices/${name}.json`,
       Body: JSON.stringify(index),
       ContentType: 'application/json',
-    }));
+    };
+    getLogger().debug(`Creating index metadata in S3`, { command: "putObject", args });
+    await this.s3.send(new PutObjectCommand(args));
     // 2. Build the index by finding all records and adding them
     const s3Index = new S3CollectionIndex(name, keys, {
       s3: this.s3,
@@ -258,11 +276,13 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
    */
   async loadIndexes(): Promise<void> {
     const prefix = `${this.collection}/indices/`;
-    const listed = await this.s3.send(new ListObjectsV2Command({
+    const args = {
       Bucket: this.bucket,
       Prefix: prefix,
-      Delimiter: '/' // Only list files directly under indices/ (no further slashes)
-    }));
+      Delimiter: '/'
+    };
+    getLogger().debug(`Listing objects from S3`, { command: "listObjectsV2", args });
+    const listed = await this.s3.send(new ListObjectsV2Command(args));
     if (!listed.Contents) return;
     for (const obj of listed.Contents) {
       const key = obj.Key!;

@@ -2,6 +2,7 @@ import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from 
 import { Readable } from 'stream';
 import { BaseCollectionIndex, IndexEntry } from '../collectionIndex';
 import { MongoNetworkError } from './s3CollectionStore';
+import { getLogger } from '../../index';
 
 
 /**
@@ -71,19 +72,23 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       
       let cachedEntry = this.indexEntryCache.get(key);
       if (cachedEntry?.etag) {
-        const result = await this.s3.send(new HeadObjectCommand({
+        const args = {
           Bucket: this.bucket,
           Key: s3Key,
-        }));
+        };
+        getLogger().debug(`Fetching index entry from S3 with If-None-Match`, { command: "head", args });
+        const result = await this.s3.send(new HeadObjectCommand(args));
         if( result.ETag == cachedEntry.etag) {
           return cachedEntry; // Return cached entry if available
         }
       }
 
-      const result = await this.s3.send(new GetObjectCommand({
+      const args = {
         Bucket: this.bucket,
         Key: s3Key,
-      }));
+      };
+      getLogger().debug(`Fetching index entry from S3`, { command: "getObject", args });
+      const result = await this.s3.send(new GetObjectCommand(args));
       const stream = result.Body as Readable;
       const data = await new Promise<string>((resolve, reject) => {
         let str = '';
@@ -120,13 +125,15 @@ export class S3CollectionIndex extends BaseCollectionIndex {
 
     while (tryCount < 3) {
       try {
-        const results = await this.s3.send(new PutObjectCommand({
+        const args = {
           Bucket: this.bucket,
           Key: s3Key,
           Body: JSON.stringify(entry.toArray()),
           ContentType: 'application/json',
           ...(entry.etag ? { IfMatch: entry.etag } : {}),
-        }));
+        };
+        getLogger().debug(`Persisting index entry to S3`, { command: "putObject", args });
+        const results = await this.s3.send(new PutObjectCommand(args));
         entry.etag = results.ETag; // Update etag on success
         entry.dirty = false;
         return;

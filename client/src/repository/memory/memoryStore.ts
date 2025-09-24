@@ -3,6 +3,7 @@ import { MemoryCollectionStore } from './memoryCollectionStore';
 import { MongoClientClosedError } from '../../errors.js';
 
 export class MemoryStore implements DbStore {
+  readonly name: string = 'memory';
   private stores: Record<string, MemoryCollectionStore<any>> = {};
   private closed = false;
 

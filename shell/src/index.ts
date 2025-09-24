@@ -1,18 +1,22 @@
-import readline from 'node:readline';
-import { SengoClient, SengoDb } from 'sengo-client';
+import { SengoClient, SengoCollection, SengoDb, getLogger, setLogLevel } from 'sengo';
+import * as readline from 'node:readline';
 import { EJSON } from 'bson';
-import { getLogger, setLogLevel } from 'sengo-client';
 
-interface ShellCommand {
-  name: string;
-  description: string;
-  run(args: string[], shell: SengoShell): Promise<void> | void;
+export class ShellContext {
+  client: SengoClient | null = null;
+  db: SengoDb | null = null;
+  currentCollection: SengoCollection<any> | null = null;
 }
 
-class ConnectCommand implements ShellCommand {
-  name = 'connect';
-  description = 'Connect to a repository. Usage: connect <repositoryType>';
-  async run(args: string[], shell: SengoShell) {
+class ConnectCommand {
+  name: string;
+  description: string;
+  
+  constructor() {
+    this.name = 'connect';
+    this.description = 'Connect to a repository. Usage: connect <repositoryType>';
+  }
+  async run(args: any[], shell: ShellContext) {
     const [repoType] = args;
     if (shell.client) {
       console.log('Already connected. Please close the current client first.');
@@ -25,10 +29,14 @@ class ConnectCommand implements ShellCommand {
   }
 }
 
-class CloseCommand implements ShellCommand {
-  name = 'close';
-  description = 'Close the current client connection.';
-  async run(_args: string[], shell: SengoShell) {
+class CloseCommand {
+    name: string;
+    description: string;
+  constructor() {
+    this.name = 'close';
+    this.description = 'Close the current client connection.';
+  }
+    async run(_args: string[], shell: SengoShell) {
     if (shell.client) {
       await shell.client.close();
       shell.client = null;
@@ -40,10 +48,14 @@ class CloseCommand implements ShellCommand {
   }
 }
 
-class UseCommand implements ShellCommand {
-  name = 'use';
-  description = 'Select a collection. Usage: use <collectionName>';
-  async run(args: string[], shell: SengoShell) {
+class UseCommand {
+    name: string;
+    description: string;
+  constructor() {
+    this.name = 'use';
+    this.description = 'Select a collection. Usage: use <collectionName>';
+  }
+    async run(args: string[], shell: SengoShell) {
     const [collectionName] = args;
     if (!shell.db) {
       console.log('Not connected. Use connect <repositoryType> first.');
@@ -56,10 +68,14 @@ class UseCommand implements ShellCommand {
   }
 }
 
-class ExitCommand implements ShellCommand {
-  name = 'exit';
-  description = 'Exit the Sengo shell.';
-  async run(_args: string[], shell: SengoShell) {
+class ExitCommand {
+    name: string;
+    description: string;
+  constructor() {
+    this.name = 'exit';
+    this.description = 'Exit the Sengo shell.';
+  }
+    async run(_args: string[], shell: SengoShell) {
     if (shell.exiting) return;
     shell.exiting = true;
     if (shell.client) await shell.client.close();
@@ -69,10 +85,14 @@ class ExitCommand implements ShellCommand {
   }
 }
 
-class HelpCommand implements ShellCommand {
-  name = 'help';
-  description = 'Show help for all commands.';
-  async run(_args: string[], shell: SengoShell) {
+class HelpCommand {
+    name: string;
+    description: string;
+  constructor() {
+    this.name = 'help';
+    this.description = 'Show help for all commands.';
+  }
+    async run(_args: string[], shell: SengoShell) {
     console.log('Available commands:');
     for (const cmdName of Object.keys(shell.commands)) {
       const cmd = shell.commands[cmdName];
@@ -86,7 +106,7 @@ class HelpCommand implements ShellCommand {
       const methodNames = Object.getOwnPropertyNames(proto)
         .filter(
           name =>
-            typeof shell.currentCollection[name] === 'function' &&
+            typeof (shell.currentCollection as any)[name] === 'function' &&
             name !== 'constructor' &&
             !name.startsWith('_') // Only public methods
         );
@@ -100,10 +120,14 @@ class HelpCommand implements ShellCommand {
   }
 }
 
-class DebugCommand implements ShellCommand {
-  name = 'debug';
-  description = 'Enable or disable debug mode. Usage: debug [on|off]';
-  run(args: string[], shell: SengoShell) {
+class DebugCommand {
+    name: string;
+    description: string;
+  constructor() {
+    this.name = 'debug';
+    this.description = 'Enable or disable debug mode. Usage: debug [on|off]';
+  }
+    run(args: string[], shell: SengoShell) {
     const arg = args[0]?.toLowerCase();
     if (arg === 'off') {
       shell.debugMode = false;
@@ -117,29 +141,34 @@ class DebugCommand implements ShellCommand {
   }
 }
 
-export class SengoShell {
-  client: SengoClient | null = null;
-  db: SengoDb | null = null;
-  currentCollection: any = null;
-  exiting = false; // Prevent duplicate exit
-  debugMode = false;
-  rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: 'sengo> '
-  });
-  commands: Record<string, ShellCommand>;
-
+class SengoShell {
+  client: SengoClient | null;
+  db: SengoDb | null;
+  public currentCollection: SengoCollection<any> | null;
+  rl: readline.Interface;
+  commands: Record<string, any>;
+  exiting: boolean;
+  debugMode: boolean;
+  
   constructor() {
-    const exitCommand = new ExitCommand();
+    this.client = null;
+    this.db = null;
+    this.currentCollection = null;
+    this.exiting = false; // Prevent duplicate exit
+    this.debugMode = false;
+    this.rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: 'sengo> '
+    });
     this.commands = {
       connect: new ConnectCommand(),
       close: new CloseCommand(),
       use: new UseCommand(),
       help: new HelpCommand(),
       debug: new DebugCommand(),
-      exit: exitCommand,
-      quit: exitCommand,
+      exit: new ExitCommand(),
+      quit: new ExitCommand(),
     };
     console.log('Welcome to the Sengo shell! Type "connect <repositoryType>" to begin.');
     this.rl.prompt();
@@ -157,16 +186,16 @@ export class SengoShell {
     if (command === 'exit' || command === 'quit') {
       try {
         await this.commands[command].run(rest, this);
-      } catch (err: any) {
-        getLogger().error(err, { command, line });
+      } catch (err) {
+        getLogger().error(err, 'unable to run exit/quit command',   { command, line });
       }
       return;
     }
     if (this.commands[command]) {
       try {
         await this.commands[command].run(rest, this);
-      } catch (err: any) {
-        getLogger().error(err, { command, line });
+      } catch (err) {
+        getLogger().error(err, 'unable to run shell command', { command, line });
       }
       this.rl.prompt();
       return;
@@ -174,8 +203,8 @@ export class SengoShell {
     // Only call defaultCommand for non-shell commands
     try {
       await this.defaultCommand.run([command, ...rest], this);
-    } catch (err: any) {
-      getLogger().error(err, { command, line });
+    } catch (err) {
+      getLogger().error(err, 'unable to run non-shell command', { command, line });
     }
     this.rl.prompt();
   }
@@ -188,7 +217,7 @@ export class SengoShell {
     }
   }
 
-  parseArgsWithJson(input: string[]): any[] {
+  parseArgsWithJson(input: string[]) {
     // Improved: parse multiple JSON objects from input, even if separated by spaces
     const args: any[] = [];
     let buffer = '';
@@ -212,8 +241,9 @@ export class SengoShell {
           try {
             args.push(EJSON.parse(buffer));
           } catch (err) {
-            console.error('Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.');
-            getLogger().error(err);
+            const tmp = 'Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.';
+            console.error(tmp);
+            getLogger().error(err, tmp);
             return [];
           }
           inJson = false;
@@ -228,18 +258,19 @@ export class SengoShell {
       try {
         args.push(EJSON.parse(buffer));
       } catch (err) {
-        console.error('Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.');
-        getLogger().error(err);
+        const tmp = 'Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.';
+        console.error(tmp);
+        getLogger().error(err, tmp);
         return [];
       }
     }
     return args;
   }
 
-  defaultCommand: ShellCommand = {
+  defaultCommand = {
     name: 'default',
     description: 'Default command handler for collection methods.',
-    run: async (args, shell) => {
+  run: async (args: string[], shell: SengoShell) => {
       const [command, ...rest] = args;
       if (command === 'exit' || command === 'quit') {
         await shell.commands[command].run(rest, shell);
@@ -253,10 +284,10 @@ export class SengoShell {
         console.log(`Unknown command or method: ${command}`);
         return;
       }
-      const fn = shell.currentCollection[command];
+      const fn = (shell.currentCollection as any)[command];
       if (typeof fn === 'function') {
         const parsedArgs = shell.parseArgsWithJson(rest);
-        getLogger().info({ command, args: parsedArgs }, 'Executing command');
+        getLogger().info('Executing command', { command, args: parsedArgs });
         if (shell.debugMode) {
           console.log('[DEBUG] Arguments:', JSON.stringify(parsedArgs, null, 2));
         }
@@ -275,3 +306,16 @@ export class SengoShell {
 }
 
 new SengoShell();
+
+// Example usage of setLogLevel
+setLogLevel('error');
+setLogLevel('debug');
+
+// Export any shell-specific functions or classes
+export {
+  SengoClient,
+  SengoCollection,
+  SengoDb,
+  getLogger,
+  setLogLevel,
+};

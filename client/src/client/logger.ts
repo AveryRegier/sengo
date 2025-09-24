@@ -1,12 +1,17 @@
-import pino from 'pino';
+import { getLogger as getCloxLogger, Logger as CloxLoggerType, LogLevel, MetaData } from 'clox';
 
-const globalLogger = pino({ level: process.env.SENGO_LOG_LEVEL || 'error' });
-export function getLogger(context: Record<string, any> = {}) {
-  return globalLogger.child(context);
+export type Logger = CloxLoggerType;
+
+const mainLogger = getCloxLogger({ name: 'sengo' });
+
+export const getLogger = (context?: MetaData): Logger => {
+    return mainLogger.child(context || {});
+};
+
+export default mainLogger;
+
+export function setLogLevel(level: LogLevel) {
+    mainLogger.level = level;
 }
-export function setLogLevel(level: string) {
-  globalLogger.level = level;
-}
-export function setLogFile(file: string) {
-  // Not implemented: would require pino.destination and re-creating logger
-}
+
+setLogLevel('debug');

@@ -25,6 +25,7 @@ export interface CollectionStore<T> {
 
 
 export interface DbStore {
+  readonly name: string;
   collection<T>(name: string): CollectionStore<T>;
   close(): Promise<void>;
   isClosed(): boolean;

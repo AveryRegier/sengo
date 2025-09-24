@@ -2,33 +2,23 @@
   "name": "sengo",
   "version": "1.0.0",
   "description": "An open source clean room implementation of a useful subset of the MongoDb client for node.js that uses AWS S3 as a backend location for documents.",
-  "type": "module",
-  "main": "./build/index.js",
-  "module": "./build/index.js",
+  "type": "commonjs",
+  "main": "./build-cjs/index.js",
   "exports": {
     ".": {
-      "import": "./build/index.js",
       "require": "./build-cjs/index.js"
     }
   },
-  "types": "./build/types/index.d.ts",
+  "types": "./build-cjs/types/index.d.ts",
   "scripts": {
-    "build:esm": "tsc --project tsconfig.json",
-    "build:cjs": "tsc --project tsconfig.cjs.json",
-    "build": "npm run build:esm && npm run postbuild:fix-extensions && npm run build:cjs",
-    "build:esm:fix": "npm run build:esm && npm run postbuild:fix-extensions",
-    "postbuild:fix-extensions": "node ./scripts/postbuild-fix-extensions.cjs",
+    "build": "tsc --project tsconfig.json && node scripts/dist.cjs",
     "test": "vitest run",
     "test:ui": "vitest",
-    "clean": "rimraf build build-cjs dist *.tsbuildinfo ./src/**/*.js ./src/**/*.test.ts  src/testutils",
-    "verify": "npm run clean && npm run build && npm test",
-    "build:dist": "node ./scripts/build-dist.cjs",
-    "dist:bump:patch": "npm run build:dist -- --bump=patch",
-    "dist:bump:minor": "npm run build:dist -- --bump=minor",
-    "dist:bump:major": "npm run build:dist -- --bump=major"
+    "clean": "rimraf build-cjs dist *.tsbuildinfo ./src/**/*.js ./src/**/*.test.ts src/testutils",
+    "verify": "npm run clean && npm run build && npm test"
   },
   "keywords": [],
-  "author": "",
+  "author": "Avery Regier <avery.regier@gmail.com> (https://github.com/AveryRegier)",
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/chance": "^1.1.6",
@@ -43,7 +33,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.839.0",
-    "pino": "^9.7.0",
+    "bson": "^6.10.4",
     "semver": "^7.7.2"
   }
 }

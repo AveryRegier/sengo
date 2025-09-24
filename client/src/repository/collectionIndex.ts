@@ -147,7 +147,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   public findKeysForQuery(query: Record<string, any>): string[] {
     // Find keys that match the query
     return this.keys.reduce((acc, key) => {
-        const valueToFind = query[key.field];
+      const valueToFind = query[key.field];
       if (valueToFind !== undefined && valueToFind !== null) {
         if (valueToFind.$in) {
           valueToFind.$in.forEach((v: string) => acc.push(`${v}`));

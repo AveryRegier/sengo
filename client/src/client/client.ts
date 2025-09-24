@@ -1,18 +1,18 @@
 import { SengoDb } from './db';
-import { getLogger } from './logger';
+import logger from './logger';
 
 export type SengoClientOptions = {
-  logger?: { level: string };
+  logger?: { level: "debug" | "info" | "warn" | "error" };
 }
 
 export class SengoClient {
   private databases: Record<string, SengoDb> = {};
   constructor(options: SengoClientOptions = {}) {
     // Initialize logger based on options
-    getLogger().level = options?.logger?.level || 'info';
+    logger.level = options?.logger?.level || logger.level;
   }
 
-  db(dbName: string = 'memory') {
+  db(dbName: string = 'memory'): SengoDb {
     if (!this.databases[dbName]) {
       this.databases[dbName] = new SengoDb(dbName);
     }
@@ -24,6 +24,6 @@ export class SengoClient {
       await this.databases[dbName].close();
       delete this.databases[dbName]; // Clean up after closing
     }
-    getLogger().info('All databases closed');
+    logger.info('All databases closed');
   }
 }

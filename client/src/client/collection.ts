@@ -28,12 +28,12 @@ export class SengoCollection<T> {
       throw new MongoClientClosedError('Store is closed');
     }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
-    this.logger.debug({ doc: docWithId }, 'Inserting document');
+    this.logger.debug('Inserting document', { doc: docWithId });
     await this.store.replaceOne({ _id: docWithId._id }, docWithId);
     // Index maintenance: update all indexes
     for (const [name, index] of await this.store.getIndexes()) {
       // Only call updateIndexOnDocumentUpdate, which is the public API
-      this.logger.debug({ name, doc: docWithId }, 'Adding doc to index');
+      this.logger.debug('Adding doc to index', { name, doc: docWithId });
       // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
       await index.addDocument(docWithId);
     }
@@ -82,7 +82,7 @@ export class SengoCollection<T> {
 
     // Index maintenance: let each index handle the update logic
     for (const [name, index] of await this.store.getIndexes()) {
-      this.logger.debug({ name, doc: updatedDoc }, 'Updating doc in index');
+      this.logger.debug('Updating doc in index', { name, doc: updatedDoc });
       await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
     }
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
@@ -102,14 +102,14 @@ export class SengoCollection<T> {
     await this.store.deleteOne(found).then(async () => {
       // Index maintenance: let each index handle the update logic
       for (const [name, index] of await this.store.getIndexes()) {
-        this.logger.debug({ name, doc: found }, 'Removing doc in index');
+        this.logger.debug('Removing doc in index', { name, doc: found });
         await index.removeDocument(found);
       }
     }).catch(err => {
       if (err.name === 'NoSuchKey') {
         return { deletedCount: 0 }; // Document not found, no action needed
       } else {
-        this.logger.error({ err }, 'Error deleting document');
+        this.logger.error('Error deleting document', err);
         throw new MongoServerError('Failed to delete document', { cause: err });
       }
     });
@@ -123,7 +123,7 @@ export class SengoCollection<T> {
     // Actually create the index in the store
     const index = await this.store.createIndex(fields || 'default_index', normalizedKeys);
     // Build the index here (assume contract is always fulfilled)
-    this.logger.debug({ index: fields || 'default_index' }, 'Calling this.store.find({}) after index creation');
+    this.logger.debug('Calling this.store.find({}) after index creation', { index: fields || 'default_index' });
     const allDocs = this.find({});
     if(await allDocs.hasNext()) {
       do {

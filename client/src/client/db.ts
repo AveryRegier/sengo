@@ -1,6 +1,6 @@
-import { DbStore, createRepository } from "../repository/index";
+import { DbStore, S3Store, createRepository } from "../repository/index";
 import { SengoCollection } from "./collection";
-import { getLogger } from "./logger";
+import logger from "./logger";
 
 export class SengoDb {
   private dbStore: DbStore;
@@ -16,7 +16,7 @@ export class SengoDb {
     return new SengoCollection<T>(
         name, 
         this.dbStore.collection<T>(name), 
-        getLogger().child({ collection: name })
+        logger.child({ db: this.dbStore.name, collection: name })
     );
   }
 

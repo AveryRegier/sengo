@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "@types/bson": "^4.0.5",
-    "bson": "^6.10.4"
+    "bson": "^6.10.4",
+    "clox": "file:../clox/dist",
+    "sengo": "^1.0.0"
   },
   "devDependencies": {
     "aws-sdk-client-mock": "^4.1.0"

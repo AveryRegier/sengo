@@ -1,16 +1,16 @@
 {
   "compilerOptions": {
     "target": "es2016",
-    "module": "esnext",
+    "module": "CommonJS",
     "moduleResolution": "node",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
-    "outDir": "build",
+    "outDir": "./build-cjs",
     "declaration": true,
-    "declarationDir": "build/types"
+    "declarationDir": "./build-cjs/types"
   },
-  "include": ["src/**/*", "tests/client/cursor.test.ts"],
-  "exclude": ["tests/**/*", "src/**/*.test.ts", "src/**/*.spec.ts", "src/**/__tests__/*"]
+  "include": ["src/**/*"],
+  "exclude": ["**/*.test.ts", "**/*.spec.ts", "tests/**/*"]
 }

@@ -3,12 +3,14 @@ import { S3CollectionStore } from './s3CollectionStore';
 import { MongoClientClosedError } from '../../errors.js';
 
 export class S3Store implements DbStore {
+  readonly name: string;
   private bucket: string;
   private stores: Record<string, S3CollectionStore<any>> = {};
   private closed = false;
 
   constructor(bucket: string = 'sengo-db') {
     this.bucket = bucket;
+    this.name = bucket;
   }
 
   collection<T>(name: string): CollectionStore<T> {
