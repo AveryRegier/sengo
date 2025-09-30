@@ -6,6 +6,17 @@ const packageJson = require('../package.json');
 // Fields to include in the dist/package.json
 const pkg = packageJson;
 
+
+// Dynamically get installed clox version
+let cloxVersion = "^0.2.0";
+try {
+  const cloxPkg = require('../../../clox/dist/package.json');
+  cloxVersion = `^${cloxPkg.version}`;
+} catch (e) {
+  console.warn('Could not find clox package.json, using default version:', cloxVersion);
+}
+const peerDependencies = Object.assign({}, pkg.peerDependencies, { clox: cloxVersion });
+
 const distPackageJson = {
   name: pkg.name,
   version: pkg.version,
@@ -24,7 +35,7 @@ const distPackageJson = {
     }
   },
   dependencies: pkg.dependencies,
-  peerDependencies: pkg.peerDependencies
+  peerDependencies
 };
 
 const distPath = path.join(__dirname, '../dist/package.json');
@@ -56,12 +67,3 @@ const buildCjsDir = path.join(clientRoot, 'build-cjs');
 copyDir(buildCjsDir, distDir);
 // copyDir(buildCjsDir, path.join(distDir, 'cjs'));
 console.log('Build directories copied to dist directory');
-
-// run npm link in dist directory
-const { execSync } = require('child_process');
-execSync('npm i', { cwd: distDir, stdio: 'inherit' });
-// execSync('npm link clox', { cwd: distDir, stdio: 'inherit' });
-execSync('npm link clox ../../../clox/dist --save', { cwd: distDir, stdio: 'inherit' });
-console.log('npm link run in dist directory');
-
-execSync('npm ls', { cwd: distDir, stdio: 'inherit' });

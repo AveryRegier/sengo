@@ -316,6 +316,7 @@ export {
   SengoClient,
   SengoCollection,
   SengoDb,
+  SengoShell,
   getLogger,
   setLogLevel,
 };
