@@ -3,16 +3,15 @@ import { normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
+import { Follower } from 'clox';
 
 export class SengoCollection<T> {
   name: string;
   store: CollectionStore<T>;
-  private logger: ReturnType<typeof getLogger>;
 
-  constructor(name: string, store: CollectionStore<T>, logger?: ReturnType<typeof getLogger>) {
+  constructor(name: string, store: CollectionStore<T>) {
     this.name = name;
     this.store = store;
-    this.logger = logger || getLogger({ collection: name });
   }
 
   /**
@@ -23,17 +22,18 @@ export class SengoCollection<T> {
   }
 
   async insertOne(doc: Record<string, any>) {
+    const logger = getLogger();
     // Check for closed store (if supported)
     if (this.store.isClosed()) {
       throw new MongoClientClosedError('Store is closed');
     }
     const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
-    this.logger.debug('Inserting document', { doc: docWithId });
+    logger.debug('Inserting document', { doc: docWithId });
     await this.store.replaceOne({ _id: docWithId._id }, docWithId);
     // Index maintenance: update all indexes
     for (const [name, index] of await this.store.getIndexes()) {
       // Only call updateIndexOnDocumentUpdate, which is the public API
-      this.logger.debug('Adding doc to index', { name, doc: docWithId });
+      logger.debug('Adding doc to index', { name, doc: docWithId });
       // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
       await index.addDocument(docWithId);
     }
@@ -41,8 +41,13 @@ export class SengoCollection<T> {
   }
 
   find(query: Record<string, any>): FindCursor<WithId<T>> {
+    const logger = getLogger();
+    const follower = new Follower(logger);
+    const loader = async () => await follower.follow(
+      () => this._findFilterSort(query), 
+      logger => logger.addContexts({cn: "SengoCollection", fn: 'find', collection: this.name }));
     // Return a FindCursor that will fetch the results lazily
-    return new LoadCursor<WithId<T>>(() => this._findFilterSort(query));
+    return new LoadCursor<WithId<T>>(loader);
   }
 
   private async _findFilterSort(query: Record<string, any>): Promise<WithId<T>[]> {
@@ -80,9 +85,10 @@ export class SengoCollection<T> {
     // Save the updated doc
     await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
 
+    const logger = getLogger();
     // Index maintenance: let each index handle the update logic
     for (const [name, index] of await this.store.getIndexes()) {
-      this.logger.debug('Updating doc in index', { name, doc: updatedDoc });
+      logger.debug('Updating doc in index', { name, doc: updatedDoc });
       await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
     }
     return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
@@ -97,19 +103,20 @@ export class SengoCollection<T> {
     if (!found) {
       return { deletedCount: 0 };
     }
+    const logger = getLogger();
     const docId = found._id;
     // Call the store to delete by _id
     await this.store.deleteOne(found).then(async () => {
       // Index maintenance: let each index handle the update logic
       for (const [name, index] of await this.store.getIndexes()) {
-        this.logger.debug('Removing doc in index', { name, doc: found });
+        logger.debug('Removing doc in index', { name, doc: found });
         await index.removeDocument(found);
       }
     }).catch(err => {
       if (err.name === 'NoSuchKey') {
         return { deletedCount: 0 }; // Document not found, no action needed
       } else {
-        this.logger.error('Error deleting document', err);
+        logger.error('Error deleting document', err);
         throw new MongoServerError('Failed to delete document', { cause: err });
       }
     });
@@ -117,13 +124,14 @@ export class SengoCollection<T> {
   }
 
   async createIndex(keys: IndexDefinition | IndexDefinition[]): Promise<string> {
+    const logger = getLogger();
     const normalizedKeys = normalizeIndexKeys(keys);
     // MongoDB-like index name: e.g. { name: 1, age: -1 } => 'name_1_age_-1'
     const fields = normalizedKeys.map(({ field, order }) => `${field}_${order}`).join('_');
     // Actually create the index in the store
     const index = await this.store.createIndex(fields || 'default_index', normalizedKeys);
     // Build the index here (assume contract is always fulfilled)
-    this.logger.debug('Calling this.store.find({}) after index creation', { index: fields || 'default_index' });
+    logger.debug('Calling this.store.find({}) after index creation', { index: fields || 'default_index' });
     const allDocs = this.find({});
     if(await allDocs.hasNext()) {
       do {
