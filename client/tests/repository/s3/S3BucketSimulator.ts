@@ -149,6 +149,12 @@ export class S3BucketSimulator {
     if (!key) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
     
     if (!(key in this.files)) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
+    if (key.includes('/indices/')) {
+      this.indexAccessLog.push(key);
+    } else if (key.includes('/data/')) {
+      this.documentAccessLog.push(key);
+    }
+
     return {
       ContentLength: this.files[key].length,
       ETag: this.etags[key], // Include the ETag in the response

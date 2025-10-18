@@ -175,10 +175,11 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       return await this.loadTheseDocuments<T>(ids.map(this.id2key.bind(this)));
     }
     await this.ensureIndexesLoaded();
-    const index = this.findBestIndex(query);
+    let queryForIndex = combineOrConditions(query);
+    const index = this.findBestIndex(queryForIndex);
     if (index) {
       const docsArrays = await Promise.all(
-        index.findKeysForQuery(query).map(async key => {
+        index.findKeysForQuery(queryForIndex).map(async key => {
           const ids = (await index.findIdsForKey(key)).map(this.id2key.bind(this));
           return await this.loadTheseDocuments<T>(ids);
         })
@@ -340,6 +341,28 @@ export class MongoNetworkError extends Error {
     super(message);
     this.name = 'MongoNetworkError';
   }
+}
+
+function combineOrConditions(query: Record<string, any>) {
+  let queryForIndex = query;
+  if (queryForIndex.$or) {
+    if (Array.isArray(queryForIndex.$or)) {
+      // replace with reduce so we can handle combining property values
+      queryForIndex = queryForIndex.$or.reduce((acc, curr) => {
+        Object.keys(curr).forEach(key => {
+          if (acc[key] === undefined) {
+            acc[key] = curr[key];
+          } else if (acc[key].$in) {
+            acc[key].$in.push(curr[key]);
+          } else {
+            acc[key] = { $in: [acc[key], curr[key]] };
+          }
+        });
+        return acc;
+      }, { ...queryForIndex });
+    }
+  }
+  return queryForIndex;
 }
 
 async function getBodyAsString(result: GetObjectCommandOutput): Promise<string> {

@@ -157,8 +157,21 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
       }
       return v.$in.includes(foundValue);
     }
+    if(v.$or) {
+      return matchesOrArray(parsed, v.$or);
+    }
+    if(k === '$or') {
+      return matchesOrArray(parsed, v);
+    }
   }
   return foundValue?.toString() === v?.toString();
+}
+
+function matchesOrArray(parsed: Record<string, any>, arr: unknown): boolean {
+  if (!Array.isArray(arr)) return false;
+  return arr.some((orCondition: Record<string, any>) =>
+    Object.entries(orCondition).every(([orKey, orValue]) => match(parsed, orKey, orValue))
+  );
 }
 
 class LoadCursor<T> implements FindCursor<T> {
