@@ -94,7 +94,14 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   public async updateIndexOnDocumentUpdate(oldDoc: Record<string, any>, newDoc: Record<string, any>): Promise<void> {
     // Only call removeDocument if oldDoc has an _id
     if (oldDoc && oldDoc._id) {
-      await this.removeDocument(oldDoc);
+      await this.changeIndex(oldDoc, (entry, id, keys) => {
+        for (const cur of keys) {
+          if (oldDoc[cur.field] !== newDoc[cur.field]) {
+            return entry.remove(id);
+          }
+        }
+        return false;
+      });
     }
     await this.addDocument(newDoc).finally(() => {
       // Ensure the index is flushed after adding the new document
@@ -114,7 +121,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     return await this.changeIndex(doc, (entry, id) => entry.remove(id));
   }
 
-  private async changeIndex(doc: Record<string, any>, fn: (entry: IndexEntry, id: string) => boolean) {
+  private async changeIndex(doc: Record<string, any>, fn: (entry: IndexEntry, id: string, keys: NormalizedIndexKeyRecord[]) => boolean) {
     if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
     const id = doc._id.toString();
     if (!this.hasFirstKey(doc)) {
@@ -133,10 +140,10 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     return void 0;
   }
 
-  private async changeSpecifiIndex(key: string, id: string, fn: (entry: IndexEntry, id: string) => boolean) {
+  private async changeSpecifiIndex(key: string, id: string, fn: (entry: IndexEntry, id: string, keys: NormalizedIndexKeyRecord[]) => boolean) {
     let entry = await this.fetch(key);
     if (entry) {
-      fn(entry, id);
+      fn(entry, id, this.keys);
     }
 
     if (entry && entry.dirty) {

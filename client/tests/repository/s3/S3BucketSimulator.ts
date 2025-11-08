@@ -8,8 +8,8 @@ export class S3BucketSimulator {
   public _debugHash: string;
   private files: Record<string, string> = {};
   private accessLog: string[] = [];
-  private indexAccessLog: string[] = [];
-  private documentAccessLog: string[] = [];
+  private indexAccessLog: { key: string; command: string }[] = [];
+  private documentAccessLog: { key: string; command: string }[] = [];
   private getObjectCallCount: Record<string, number> = {};
   private etags: Record<string, string> = {}; // Store ETags for each file
 
@@ -116,9 +116,9 @@ export class S3BucketSimulator {
     this.etags[key] = chance.guid(); // Generate a new ETag for the file
     // Log all index/document file writes
     if (key.includes('/indices/')) {
-      this.indexAccessLog.push(key);
+      this.indexAccessLog.push({ key, command: 'putObject' });
     } else if (key.includes('/documents/')) {
-      this.documentAccessLog.push(key);
+      this.documentAccessLog.push({ key, command: 'putObject' });
     }
     // For backward compatibility
     this.accessLog.push(key);
@@ -130,9 +130,9 @@ export class S3BucketSimulator {
     if (!key) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
     // Log all index/document file reads
     if (key.includes('/indices/')) {
-      this.indexAccessLog.push(key);
+      this.indexAccessLog.push({ key, command: 'getObject' });
     } else if (key.includes('/data/')) {
-      this.documentAccessLog.push(key);
+      this.documentAccessLog.push({ key, command: 'getObject' });
     }
     // For backward compatibility
     this.accessLog.push(key);
@@ -150,9 +150,9 @@ export class S3BucketSimulator {
     
     if (!(key in this.files)) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
     if (key.includes('/indices/')) {
-      this.indexAccessLog.push(key);
+      this.indexAccessLog.push({ key, command: 'headObject' });
     } else if (key.includes('/data/')) {
-      this.documentAccessLog.push(key);
+      this.documentAccessLog.push({ key, command: 'headObject' });
     }
 
     return {
@@ -166,9 +166,9 @@ export class S3BucketSimulator {
     if (!key) return { DeleteMarker: false };
     // Log all index/document file deletes
     if (key.includes('/indices/')) {
-      this.indexAccessLog.push(key);
+      this.indexAccessLog.push({ key, command: 'deleteObject' });
     } else if (key.includes('/documents/')) {
-      this.documentAccessLog.push(key);
+      this.documentAccessLog.push({ key, command: 'deleteObject' });
     }
     // For backward compatibility
     this.accessLog.push(key);
@@ -198,11 +198,15 @@ export class S3BucketSimulator {
   }
 
   getIndexAccessLog() {
-    return [...this.indexAccessLog];
+    return [...this.indexAccessLog.map(entry => entry.key)];
   }
 
   getDocumentAccessLog() {
-    return [...this.documentAccessLog];
+    return [...this.documentAccessLog.map(entry => entry.key)];
+  }
+
+  getIndexAccessLogDetailed() {
+    return [...this.indexAccessLog];
   }
 
   listObjects(prefix: string = ''): string[] {

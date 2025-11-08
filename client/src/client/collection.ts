@@ -3,7 +3,7 @@ import { normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
-import { Follower } from 'clox';
+import logger, { Follower } from 'clox';
 
 export class SengoCollection<T> {
   name: string;
@@ -186,8 +186,13 @@ class LoadCursor<T> implements FindCursor<T> {
 
   private async ensureLoaded() {
     if (!this._docs) {
-      this._docs = await this._loader();
-      this._index = 0;
+      const currentDocs = await this._loader();
+      if(!this._docs) {
+        this._docs = currentDocs;
+        this._index = 0;
+      } else if (this._docs !== currentDocs) {
+        logger.warn('LoadCursor: Detected concurrent searching resulting in different document sets.');
+      }
     }
   }
 

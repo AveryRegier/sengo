@@ -78,7 +78,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         };
         getLogger().debug(`Fetching index entry from S3 with If-None-Match`, { command: "head", args });
         const result = await this.s3.send(new HeadObjectCommand(args));
-        if( result.ETag == cachedEntry.etag) {
+        if( result?.ETag == cachedEntry.etag) {
           return cachedEntry; // Return cached entry if available
         }
       }
