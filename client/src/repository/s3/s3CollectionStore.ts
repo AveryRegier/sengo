@@ -23,10 +23,19 @@ export interface S3CollectionStoreOptions {
     secretAccessKey: string;
     sessionToken?: string;
   };
+  // Optional request handler (e.g. a NodeHttpHandler) to allow reusing the same
+  // connection pool / agent across multiple S3Client instances. If not
+  // provided, no special handler will be set here — callers (for example
+  // `S3Store`) may create and provide a shared handler to apply across
+  // all collections.
+  requestHandler?: any;
 }
 
 export class S3CollectionStore<T> implements CollectionStore<T> {
   private s3: S3Client;
+  // Keep a reference to the request handler used so tests and callers can
+  // verify reuse without depending on AWS SDK internals.
+  private requestHandler?: any;
   private bucket: string;
   private collection: string;
   private closed = false;
@@ -36,10 +45,17 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   constructor(collection: string, bucket: string, opts?: S3CollectionStoreOptions) {
     this.bucket = bucket;
     this.collection = collection;
-    this.s3 = new S3Client({
+    const s3Config: any = {
       ...(opts?.region ? { region: opts.region } : {}),
       ...(opts?.credentials ? { credentials: opts.credentials } : {}),
-    });
+    };
+
+    if (opts?.requestHandler) {
+      s3Config.requestHandler = opts.requestHandler;
+      this.requestHandler = opts.requestHandler;
+    }
+
+    this.s3 = new S3Client(s3Config);
   }
 
   async getIndexes(): Promise<Map<string, CollectionIndex>> {
