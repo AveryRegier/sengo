@@ -15,6 +15,7 @@ import { Readable } from 'stream';
 import { WithId } from '../../types.js';
 import { getLogger } from '../../client/logger.js';
 import { get } from 'http';
+import { FindOptions } from '../../index.js';
 
 export interface S3CollectionStoreOptions {
   region?: string;
@@ -179,7 +180,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     return bestIndex;
   }
 
-  public async findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
+  public async findCandidates(query: Record<string, any>, options?: FindOptions): Promise<WithId<T>[]> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (query._id) {
       const ids: string[] = [];
@@ -196,8 +197,9 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     if (index) {
       const docsArrays = await Promise.all(
         index.findKeysForQuery(queryForIndex).map(async key => {
-          const ids = (await index.findIdsForKey(key)).map(this.id2key.bind(this));
-          return await this.loadTheseDocuments<T>(ids);
+          const ids = await index.findIdsForKey(key);
+          const s3Keys = ids.map(this.id2key.bind(this));
+          return await this.loadTheseDocuments<T>(s3Keys);
         })
       );
       return docsArrays.flat();

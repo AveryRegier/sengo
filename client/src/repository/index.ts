@@ -1,3 +1,4 @@
+import { FindOptions } from '../client/collection';
 import { FindCursor, Order, WithId } from '../types';
 import { CollectionIndex } from './collectionIndex';
 import { MemoryStore } from './memory/index';
@@ -18,7 +19,7 @@ export interface CollectionStore<T> {
   createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex>;
   deleteOne(id: any): Promise<void>;
   dropIndex(name: string): Promise<void>;
-  findCandidates(query: Record<string, any>): Promise<WithId<T>[]>
+  findCandidates(query: Record<string, any>, options?: FindOptions): Promise<WithId<T>[]>
   isClosed(): boolean;
   replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void>;
 }
