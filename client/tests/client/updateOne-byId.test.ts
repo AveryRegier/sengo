@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SengoClient } from '../src';
+import { SengoClient } from '../../src';
 import Chance from 'chance';
-import { S3BucketSimulator } from './repository/s3/S3BucketSimulator';
+import { S3BucketSimulator } from '../repository/s3/S3BucketSimulator';
 import { mockClient } from 'aws-sdk-client-mock';
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand } from '@aws-sdk/client-s3';
 

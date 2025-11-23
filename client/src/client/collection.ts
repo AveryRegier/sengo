@@ -5,6 +5,10 @@ import { FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
 import logger, { Follower } from 'clox';
 
+export type FindOptions = {
+  sort?: Record<string, 1 | -1>;
+};
+
 export class SengoCollection<T> {
   name: string;
   store: CollectionStore<T>;
@@ -50,8 +54,8 @@ export class SengoCollection<T> {
     return new LoadCursor<WithId<T>>(loader);
   }
 
-  private async _findFilterSort(query: Record<string, any>): Promise<WithId<T>[]> {
-    return this.store.findCandidates(query).then(async results => {
+  private async _findFilterSort(query: Record<string, any>, options?: FindOptions): Promise<WithId<T>[]> {
+    let promise = this.store.findCandidates(query).then(async (results) => {
       return results.filter((parsed: Record<string, any>) => {
         if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
           if (Object.entries(query).every(([k, v]) => match(parsed, k, v))) {
@@ -61,7 +65,34 @@ export class SengoCollection<T> {
         return false;
       });
     });
+    if(options?.sort) {
+      promise = promise.then(docs => {
+        const sortKeys = Object.entries(options?.sort ?? {});
+        docs.sort((a: any, b: any) => {
+          for (const [key, order] of sortKeys) {
+            if (a[key] < b[key]) return order === 1 ? -1 : 1;
+            if (a[key] > b[key]) return order === 1 ? 1 : -1;
+          }
+          return 0;
+        });
+        return docs;
+      });
+    }   
+    return promise;
   }
+
+  findOne(query: Record<string, any>, options?: FindOptions): Promise<WithId<T> | null> {
+    const logger = getLogger();
+    const follower = new Follower(logger);
+    const loader = async () => {
+      const docs = await follower.follow(
+        () => this._findFilterSort(query, options), 
+        logger => logger.addContexts({cn: "SengoCollection", fn: 'findOne', collection: this.name }));
+      
+      return docs.length > 0 ? docs[0] : null;
+    };
+    return loader();
+  } 
 
   async updateOne(filter: Record<string, any>, update: Record<string, any>) {
     // Find the first matching document
@@ -162,6 +193,9 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
     }
     if(k === '$or') {
       return matchesOrArray(parsed, v);
+    }
+    if(v.$max) {
+
     }
   }
   return foundValue?.toString() === v?.toString();
