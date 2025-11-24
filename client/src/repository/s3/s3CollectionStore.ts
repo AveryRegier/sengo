@@ -191,13 +191,26 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       }
       return await this.loadTheseDocuments<T>(ids.map(this.id2key.bind(this)));
     }
+    
     await this.ensureIndexesLoaded();
     let queryForIndex = combineOrConditions(query);
     const index = this.findBestIndex(queryForIndex);
     if (index) {
       const docsArrays = await Promise.all(
         index.findKeysForQuery(queryForIndex).map(async key => {
-          const ids = await index.findIdsForKey(key);
+          let ids = await index.findIdsForKey(key);
+          if(options) {
+            // Apply in-memory filtering based on options (e.g., sort and limit)
+            // There is a specific optimization where sorting only _id with a limit can reduce the number of documents to load
+            if(options.sort?._id && Object.keys(options.sort).length === 1 && options.limit) {
+              // Sort by _id only
+              ids = ids.sort((a, b) => {
+                if (a < b) return options.sort!._id === 1 ? -1 : 1;
+                if (a > b) return options.sort!._id === 1 ? 1 : -1;
+                return 0;
+              }).slice(0, options.limit);
+            }
+          }
           const s3Keys = ids.map(this.id2key.bind(this));
           return await this.loadTheseDocuments<T>(s3Keys);
         })

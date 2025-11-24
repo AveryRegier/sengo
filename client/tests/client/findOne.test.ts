@@ -23,9 +23,7 @@ describe('findOne', () => {
   beforeEach(async () => {
     s3sim = new S3BucketSimulator();
     s3Client = { send: s3sim.handleCommand.bind(s3sim) };
-    client = new SengoClient();
-    collection = client.db('s3').collection<TestDoc>('people');
-    (collection.store as any).s3 = s3Client;
+    openClient();
       // Mock S3 send method to simulate S3 behavior
     // Insert random documents
     docs = [];
@@ -33,6 +31,12 @@ describe('findOne', () => {
       await addDocument();
     }
   });
+  
+  function openClient() {
+    client = new SengoClient();
+    collection = client.db('s3').collection<TestDoc>('people');
+    (collection.store as any).s3 = s3Client;
+  }
 
   it('finds documents using $in and sorts by field', async () => {
     // Pick 3 random names from inserted docs
@@ -59,14 +63,17 @@ describe('findOne', () => {
     // Find most recent document matching that indexed field
     const expected = await addDocument({[key]: value} as Partial<TestDoc>); // Add another document with same indexed field to ensure multiple matches
     await collection.createIndex({ [key]: 1 });
-
+    s3sim.clearAccessLog();
+    client.close();
+    openClient();
     const found = await collection.findOne({ [key]: value }, { sort: { _id: -1 } });
     expect(found).toBeDefined();
     expect(found?.[key]).toEqual(value);
     expect(found?._id?.toString()).toMatchObject(expected?._id?.toString() as any); // Last inserted doc should be most recent
 
     // the hard part. Be smart about the index usage and load only the one correct document file
-    // expect(s3sim.getDocumentAccessLog()).toMatchObject([`/people/data/${expected._id}.json`]);
+    expect(s3sim.getDocumentAccessLog()).toContain(`people/data/${expected._id.toString()}.json`);
+    expect(s3sim.getDocumentAccessLog().length).toBe(1);
   });
 
   async function addDocument(fields: Partial<TestDoc> = {}) {

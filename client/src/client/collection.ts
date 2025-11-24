@@ -4,9 +4,11 @@ import { ObjectId } from 'bson';
 import { FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
 import logger, { Follower } from 'clox';
+import { sort, Sort } from '../util/sort.js';
 
 export type FindOptions = {
-  sort?: Record<string, 1 | -1>;
+  sort?: Sort;
+  limit?: number;
 };
 
 export class SengoCollection<T> {
@@ -55,7 +57,7 @@ export class SengoCollection<T> {
   }
 
   private async _findFilterSort(query: Record<string, any>, options?: FindOptions): Promise<WithId<T>[]> {
-    let promise = this.store.findCandidates(query).then(async (results) => {
+    let promise = this.store.findCandidates(query, options).then(async (results) => {
       return results.filter((parsed: Record<string, any>) => {
         if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
           if (Object.entries(query).every(([k, v]) => match(parsed, k, v))) {
@@ -67,15 +69,7 @@ export class SengoCollection<T> {
     });
     if(options?.sort) {
       promise = promise.then(docs => {
-        const sortKeys = Object.entries(options?.sort ?? {});
-        docs.sort((a: any, b: any) => {
-          for (const [key, order] of sortKeys) {
-            if (a[key] < b[key]) return order === 1 ? -1 : 1;
-            if (a[key] > b[key]) return order === 1 ? 1 : -1;
-          }
-          return 0;
-        });
-        return docs;
+        return sort<WithId<T>>(options.sort!)(docs);
       });
     }   
     return promise;
@@ -86,7 +80,7 @@ export class SengoCollection<T> {
     const follower = new Follower(logger);
     const loader = async () => {
       const docs = await follower.follow(
-        () => this._findFilterSort(query, options), 
+        () => this._findFilterSort(query, { ...options, limit: 1 }), 
         logger => logger.addContexts({cn: "SengoCollection", fn: 'findOne', collection: this.name }));
       
       return docs.length > 0 ? docs[0] : null;
