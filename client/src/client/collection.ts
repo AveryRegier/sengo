@@ -191,6 +191,12 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
     if(v.$max) {
 
     }
+    if(v.$eq != undefined) {
+      v = v.$eq;
+    }
+  }
+  if(Array.isArray(foundValue)) { 
+    return foundValue.includes(v) || foundValue.map(fv => fv?.toString()).includes(v?.toString());
   }
   return foundValue?.toString() === v?.toString();
 }

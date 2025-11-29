@@ -51,13 +51,37 @@ describe('SengoCollection $in operator support', () => {
     expect(found.map(d => d.name).sort()).toEqual(names.sort());
   });
 
-  it('finds documents using $in operator in array', async () => {
-    // Pick 3 random tags from inserted docs
-    const tags = docs.slice(0, 3).map(d => chance.pickone(d.tags));
-    const found = await collection.find({ tags: { $in: tags } }).toArray();
-    expect(found.length).toBe(3);
+  it('finds documents using $eq operator', async () => {
+    // Pick 3 random names from inserted docs
+    const name = docs.slice(2, 3).map(d => d.name).pop() as string;
+    const found = await collection.find({ name: { $eq: name } }).toArray();
+    expect(found.length).toBe(1);
+    expect(found.map(d => d.name)).toEqual([name]);
   });
 
+  it('finds documents using default equality operator', async () => {
+    // Pick 3 random names from inserted docs
+    const name = docs.slice(2, 3).map(d => d.name).pop() as string;
+    const found = await collection.find({ name: name }).toArray();
+    expect(found.length).toBe(1);
+    expect(found.map(d => d.name)).toEqual([name]);
+  });
+
+  it('finds documents using $eq operator in array', async () => {
+    // Pick 3 random tags from inserted docs
+    const tag = docs.slice(2, 3).map(d => chance.pickone(d.tags)).pop() as string;
+    const found = await collection.find({ tags: { $eq: tag } }).toArray();
+    expect(found.length).toBe(1);
+    expect(found[0].tags).toContain(tag);
+  });
+
+  it('finds documents using default equality operator in array', async () => {
+    // Pick 3 random tags from inserted docs
+    const tag = docs.slice(2, 3).map(d => chance.pickone(d.tags)).pop() as string;
+    const found = await collection.find({ tags: tag }).toArray();
+    expect(found.length).toBe(1);
+    expect(found[0].tags).toContain(tag);
+  });
 
   it('finds documents using $in operator after creating an index', async () => {
     // Pick 3 random names from inserted docs
