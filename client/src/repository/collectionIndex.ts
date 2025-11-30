@@ -20,15 +20,15 @@ export interface CollectionIndex {
 }
 
 export class IndexEntry {
-  ids: Set<string>;
+  ids!: Set<string>;
   etag?: string;
   loadedAt: number;
   dirty: boolean = false;
   added: Set<string> | undefined = undefined;
   removed: Set<string> | undefined = undefined;
 
-  constructor(ids: string[] = [], etag?: string) {
-    this.ids = new Set(ids);
+  constructor(data: string = '[]', etag?: string) {
+    this.deserialize(data);
     this.etag = etag;
     this.loadedAt = Date.now();
   }
@@ -59,8 +59,8 @@ export class IndexEntry {
     return false;
   }
 
-  public update(newIds: string[], etag?: string): void {
-    this.ids = new Set(newIds);
+  public update(newData: string, etag?: string): void {
+    this.deserialize(newData);
     this.etag = etag || this.etag;
     this.loadedAt = Date.now();
 
@@ -68,8 +68,17 @@ export class IndexEntry {
     this.removed?.forEach(id => this.ids.delete(id));
   }
 
+  // used by searches
   public toArray(): string[] {
     return Array.from(this.ids);
+  }
+
+  private deserialize(serialized: string) {
+    this.ids =  new Set(JSON.parse(serialized));
+  }
+
+  public serialize(): string {
+    return JSON.stringify(Array.from(this.ids));
   }
 }
 
@@ -188,7 +197,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     });
     return validKeys;
   }
-  
+
   private mapKeyValuesToIndexFormat(validKeys: NormalizedIndexKeyRecord[], doc: Record<string, any>): string[] {
     return validKeys.reduce((acc, key) => {
       const valueToFind = doc[key.field];

@@ -96,14 +96,13 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         stream.on('end', () => resolve(str));
         stream.on('error', reject);
       });
-      const ids = JSON.parse(data);
       const etag = result.ETag;
       cachedEntry = this.indexEntryCache.get(key); // allow for late changes
       if(cachedEntry) {
-        cachedEntry.update(Array.isArray(ids) ? ids : [], etag);
+        cachedEntry.update(data, etag);
         return cachedEntry;
       }
-      const entry = new IndexEntry(Array.isArray(ids) ? ids : [], etag);
+      const entry = new IndexEntry(data, etag);
       this.indexEntryCache.set(key, entry); // Cache the entry for future use
       return entry;
     } catch (err: any) {
@@ -128,7 +127,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         const args = {
           Bucket: this.bucket,
           Key: s3Key,
-          Body: JSON.stringify(entry.toArray()),
+          Body: entry.serialize(),
           ContentType: 'application/json',
           ...(entry.etag ? { IfMatch: entry.etag } : {}),
         };
@@ -141,7 +140,7 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         if (err.$metadata?.httpStatusCode === 412) {
           // ETag mismatch, refetch and retry
           const fresh = await this.fetch(key);
-          entry.update(fresh.toArray(), fresh.etag);
+          entry.update(fresh.serialize(), fresh.etag);
           tryCount++;
           continue;
         }
