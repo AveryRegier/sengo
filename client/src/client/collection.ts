@@ -188,11 +188,9 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
     if(k === '$or') {
       return matchesOrArray(parsed, v);
     }
-    if(v.$max) {
-
-    }
     if(v.$eq != undefined) {
       v = v.$eq;
+      // fall through to equality check
     }
   }
   if(Array.isArray(foundValue)) { 

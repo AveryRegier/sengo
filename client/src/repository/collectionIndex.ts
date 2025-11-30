@@ -166,15 +166,19 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     }, [] as string[]);
   }
 
-  public makeAllIndexKeys(query: Record<string, any>): string[] {
-    // Find keys that match the query
+  public makeAllIndexKeys(doc: Record<string, any>): string[] {
+    const validKeys: NormalizedIndexKeyRecord[] = this.filterValidKeysForRecord(doc);
+    return this.mapKeyValuesToIndexFormat(validKeys, doc);
+  }
+
+  private filterValidKeysForRecord(doc: Record<string, any>) {
     const validKeys: NormalizedIndexKeyRecord[] = [];
     // we have to stop the key generation once any field is not defined
     this.keys.forEach(key => {
-      const valueToFind = query[key.field];
+      const valueToFind = doc[key.field];
       if (valueToFind !== undefined) {
-        if(Array.isArray(valueToFind)) {
-          if(valueToFind.length > 0) {
+        if (Array.isArray(valueToFind)) {
+          if (valueToFind.length > 0) {
             validKeys.push(key);
           }
         } else {
@@ -182,9 +186,12 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
         }
       }
     });
-
+    return validKeys;
+  }
+  
+  private mapKeyValuesToIndexFormat(validKeys: NormalizedIndexKeyRecord[], doc: Record<string, any>): string[] {
     return validKeys.reduce((acc, key) => {
-      const valueToFind = query[key.field];
+      const valueToFind = doc[key.field];
       let newKeys: string[] = [];
       if (Array.isArray(valueToFind)) {
         newKeys = valueToFind.map((v: string) => `${v}`);
