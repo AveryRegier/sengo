@@ -137,9 +137,9 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
       // If the first key is not set, we don't index this document
       return;
     }
-    const allTheKeys = this.makeAllIndexKeys(doc);
+    const allTheKeys = this.makeAllIndexEntryKeys(doc);
     const results = await Promise.allSettled(
-      allTheKeys.map(key => this.changeSpecifiIndex(key, id, fn))
+      allTheKeys.map(key => this.changeSpecifiIndexEntry(key, id, fn))
     );
     // Handle results if needed
     const errors = results.filter(r => r.status === 'rejected').map(r => (r as PromiseRejectedResult).reason);
@@ -149,7 +149,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     return void 0;
   }
 
-  private async changeSpecifiIndex(key: string, id: string, fn: (entry: IndexEntry, id: string, keys: NormalizedIndexKeyRecord[]) => boolean) {
+  private async changeSpecifiIndexEntry(key: string, id: string, fn: (entry: IndexEntry, id: string, keys: NormalizedIndexKeyRecord[]) => boolean) {
     let entry = await this.fetch(key);
     if (entry) {
       fn(entry, id, this.keys);
@@ -175,7 +175,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     }, [] as string[]);
   }
 
-  public makeAllIndexKeys(doc: Record<string, any>): string[] {
+  public makeAllIndexEntryKeys(doc: Record<string, any>): string[] {
     const validKeys: NormalizedIndexKeyRecord[] = this.filterValidKeysForRecord(doc);
     return this.mapKeyValuesToIndexFormat(validKeys, doc);
   }
