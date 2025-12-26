@@ -148,12 +148,14 @@ export class S3BucketSimulator {
     const key = typeof keyOrCmd === 'string' ? keyOrCmd : S3BucketSimulator.extractKey(keyOrCmd);
     if (!key) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
     
-    if (!(key in this.files)) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
+    // Log before checking existence to track all access attempts
     if (key.includes('/indices/')) {
       this.indexAccessLog.push({ key, command: 'headObject' });
     } else if (key.includes('/data/')) {
       this.documentAccessLog.push({ key, command: 'headObject' });
     }
+    
+    if (!(key in this.files)) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey' });
 
     return {
       ContentLength: this.files[key].length,
@@ -207,6 +209,20 @@ export class S3BucketSimulator {
 
   getIndexAccessLogDetailed() {
     return [...this.indexAccessLog];
+  }
+
+  /**
+   * Get all logs with detailed information (command type and key)
+   */
+  getLogs(): { command: string; key: string }[] {
+    return [...this.indexAccessLog, ...this.documentAccessLog];
+  }
+
+  /**
+   * Clear all logs
+   */
+  clearLogs() {
+    this.clearAccessLog();
   }
 
   listObjects(prefix: string = ''): string[] {

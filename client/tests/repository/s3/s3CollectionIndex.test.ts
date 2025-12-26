@@ -39,7 +39,7 @@ describe('S3CollectionIndex', () => {
   });
 
   it('persistEntry sends PutObjectCommand', async () => {
-    const entry = new IndexEntry(JSON.stringify(['id1', 'id2']), 'etag123');
+    const entry = new IndexEntry([{ field: 'foo', order: 1 }], JSON.stringify(['id1', 'id2']), 'etag123');
     await (index as any).persistEntry('bar', entry);
     expect(s3.sent.some(cmd => cmd.constructor.name === 'PutObjectCommand')).toBe(true);
   });

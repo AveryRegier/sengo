@@ -27,9 +27,9 @@ describe('SengoCollection createIndex and find (Memory)', () => {
   });
 
   beforeEach(async () => {
-    client = new SengoClient('memory');
+    client = new SengoClient();
     const collectionName = 'col_' + chance.hash({ length: 8 });
-    collection = client.db().collection<TestDoc>(collectionName);
+    collection = client.db('memory').collection<TestDoc>(collectionName);
     // Create and insert docs, capturing their _id
     docs = [];
     for (let i = 0; i < 3; i++) {
@@ -44,7 +44,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
   });
 
   it('should insert, create index, insert more, and find docs matching the index', async () => {
-    const indexField = Object.keys(docs[0]).find(k => k !== '_id')!;
+    const indexField = Object.keys(docs[0]).find(k => k !== '_id')! as keyof TestDoc;
     const indexName = await collection.createIndex({ [indexField]: 1 });
     expect(typeof indexName).toBe('string');
     
@@ -63,7 +63,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
   });
 
   it('should insert, create index, insert more, and find all docs', async () => {
-    const indexField = Object.keys(docs[0]).find(k => k !== '_id')!;
+    const indexField = Object.keys(docs[0]).find(k => k !== '_id')! as keyof TestDoc;
     const indexName = await collection.createIndex({ [indexField]: 1 });
     expect(typeof indexName).toBe('string');
     
@@ -88,7 +88,7 @@ describe('SengoCollection createIndex and find (Memory)', () => {
 
   it('should create index and allow queries to work as expected', async () => {
     // Only observable behavior is tested for memory store
-    const indexField = Object.keys(docs[0]).find(k => k !== '_id')!;
+    const indexField = Object.keys(docs[0]).find(k => k !== '_id')! as keyof TestDoc;
     const indexName = await collection.createIndex({ [indexField]: 1 });
     expect(typeof indexName).toBe('string');
     // Query by the indexed field should return at least one doc

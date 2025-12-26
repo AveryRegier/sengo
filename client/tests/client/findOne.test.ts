@@ -10,6 +10,7 @@ type TestDoc = {
   age: number;
   city: string;
   tags: string[];
+  createdAt: string;
 };
 
 describe('findOne', () => {
@@ -54,6 +55,14 @@ describe('findOne', () => {
     expect(found?._id?.toString()).toMatchObject(expected?._id?.toString() as any); // Last inserted doc should be most recent
   });
 
+  it('finds most recently created document using sort by iso date', async () => {
+    // Pick 3 random names from inserted docs
+    const found = await collection.findOne({}, { sort: { createdAt: -1 } });
+    expect(found).toBeDefined();
+    const expected = docs[docs.length - 1];
+    expect(found?._id?.toString()).toMatchObject(expected?._id?.toString() as any); // Last inserted doc should be most recent
+  });
+
   it('finds most recently created document from an index using sort by most recent ObjectId', async () => {
     // Pick any random docuument
     const notFound = chance.pickone(docs);
@@ -81,7 +90,8 @@ describe('findOne', () => {
       name: fields.name ?? chance.name(),
       age: fields.age ?? chance.age(),
       city: fields.city ?? chance.city(),
-      tags: fields.tags ?? chance.unique(chance.word, 3) // Ensure unique tags
+      tags: fields.tags ?? chance.unique(chance.word, 3), // Ensure unique tags
+      createdAt: fields.createdAt ?? new Date().toISOString(),
     };
     const result = await collection.insertOne(doc);
     const docWithId = { ...doc, _id: result.insertedId };

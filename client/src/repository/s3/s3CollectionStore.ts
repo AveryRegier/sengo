@@ -153,28 +153,17 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   }
 
   /**
-   * Find the best matching index for the query based on NormalizedIndexKeyRecord.
-   * Only the first key in the index must be present in the query to use the index.
+   * Find the best matching index for the query.
+   * Uses the index scoring logic from the base class.
    */
   private findBestIndex(query: Record<string, any>): S3CollectionIndex | undefined {
     let bestIndex: S3CollectionIndex | undefined;
     let bestScore = 0;
     for (const index of this.loadedIndexes.values()) {
-      // Only consider indexes where the first key is present in the query
-      if (index.keys.length > 0 && query.hasOwnProperty(index.keys[0].field)) {
-        // Score: number of consecutive keys matched from the start
-        let score = 1;
-        for (let i = 1; i < index.keys.length; i++) {
-          if (query.hasOwnProperty(index.keys[i].field)) {
-            score++;
-          } else {
-            break;
-          }
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          bestIndex = index;
-        }
+      const score = index.scoreForQuery(query);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
       }
     }
     return bestIndex;
@@ -196,27 +185,30 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     let queryForIndex = combineOrConditions(query);
     const index = this.findBestIndex(queryForIndex);
     if (index) {
-      const docsArrays = await Promise.all(
-        index.findKeysForQuery(queryForIndex).map(async key => {
-          let ids = await index.findIdsForKey(key);
-          if(options) {
-            // Apply in-memory filtering based on options (e.g., sort and limit)
-            // There is a specific optimization where sorting only _id with a limit can reduce the number of documents to load
-            if(options.sort?._id && Object.keys(options.sort).length === 1 && options.limit) {
-              // Sort by _id only
-              ids = ids.sort((a, b) => {
-                if (a < b) return options.sort!._id === 1 ? -1 : 1;
-                if (a > b) return options.sort!._id === 1 ? 1 : -1;
-                return 0;
-              }).slice(0, options.limit);
-            }
+      const indexKeyValues = index.findKeysForQuery(queryForIndex);
+      // If findKeysForQuery returns empty array, index can't be used (missing required fields)
+      if (indexKeyValues.length > 0) {
+        // Build index options including filters for the final indexed field if present in query
+        const indexOptions: any = { ...options };
+        if (index.keys.length > 1) {
+          const finalField = index.keys[index.keys.length - 1].field;
+          if (queryForIndex[finalField] !== undefined) {
+            // Add the final field filter to options so IndexEntry.toArray can filter
+            indexOptions[finalField] = typeof queryForIndex[finalField] === 'object'
+              ? queryForIndex[finalField]
+              : { $eq: queryForIndex[finalField] };
           }
-          const s3Keys = ids.map(this.id2key.bind(this));
-          return await this.loadTheseDocuments<T>(s3Keys);
-        })
-      );
-      return docsArrays.flat();
-
+        }
+        
+        const docsArrays = await Promise.all(
+          indexKeyValues.map(async key => {
+            let ids = await index.findIdsForKey(key, indexOptions);
+            const s3Keys = ids.map(this.id2key.bind(this));
+            return await this.loadTheseDocuments<T>(s3Keys);
+          })
+        );
+        return docsArrays.flat();
+      }
     }
     return this.scan();
   }

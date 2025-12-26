@@ -46,11 +46,11 @@ export class SengoCollection<T> {
     return { acknowledged: true, insertedId: docWithId._id };
   }
 
-  find(query: Record<string, any>): FindCursor<WithId<T>> {
+  find(query: Record<string, any>, options?: FindOptions): FindCursor<WithId<T>> {
     const logger = getLogger();
     const follower = new Follower(logger);
     const loader = async () => await follower.follow(
-      () => this._findFilterSort(query), 
+      () => this._findFilterSort(query, options), 
       logger => logger.addContexts({cn: "SengoCollection", fn: 'find', collection: this.name }));
     // Return a FindCursor that will fetch the results lazily
     return new LoadCursor<WithId<T>>(loader);
@@ -71,7 +71,10 @@ export class SengoCollection<T> {
       promise = promise.then(docs => {
         return sort<WithId<T>>(options.sort!)(docs);
       });
-    }   
+    }
+    if(options?.limit !== undefined && options.limit > 0) {
+      promise = promise.then(docs => docs.slice(0, options.limit));
+    }
     return promise;
   }
 

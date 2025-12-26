@@ -1,4 +1,6 @@
-export type Order = 1 | -1 | 'text';
+import { SortDirection } from "./util/sort";
+
+export type Order = SortDirection | 'text';
 export type IndexKeyRecord = Record<string, Order>;
 export type IndexDefinition = string | IndexKeyRecord;
 export type WithId<T> = T & { _id: string | number };

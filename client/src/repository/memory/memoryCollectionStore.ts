@@ -6,12 +6,24 @@ import { MongoClientClosedError } from '../../errors.js';
 import { FindCursor, WithId } from '../../types';
 
 export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
-  // Inherits removeDocument from BaseCollectionIndex
+  private entries: Map<string, any> = new Map(); // Map from index key to IndexEntry
 
-  async findIdsForKey(key: string): Promise<string[]> {
+  // Override fetch to return from memory
+  protected async fetch(key: string): Promise<any> {
+    const entry = this.entries.get(key);
+    if (entry) {
+      return entry;
+    }
+    // Return new entry if not found
+    const newEntry = this.createEntry();
+    this.entries.set(key, newEntry);
+    return newEntry;
+  }
+
+  async findIdsForKey(key: string, options?: Record<string, any>): Promise<string[]> {
     let entry = await this.fetch(key);
     // logger is not available here; consider injecting if needed for debug
-    return entry.toArray();
+    return entry.toArray(options);
   }
 }
 
@@ -41,8 +53,60 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
   }
 
-  findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
+  /**
+   * Find the best matching index for the query.
+   * Uses the index scoring logic from the base class.
+   */
+  private findBestIndex(query: Record<string, any>): MemoryCollectionIndex | undefined {
+    let bestIndex: MemoryCollectionIndex | undefined;
+    let bestScore = 0;
+    for (const index of this.indexes.values()) {
+      const score = index.scoreForQuery(query);
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+    }
+    return bestIndex;
+  }
+
+  async findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
     this.checkClosure();
+    
+    // Try to use an index if available
+    const index = this.findBestIndex(query);
+    if (index) {
+      const indexKeys = index.findKeysForQuery(query);
+      // If findKeysForQuery returns empty array, index can't be used (missing required fields)
+      if (indexKeys.length > 0) {
+        // Build index options including filters for the final indexed field if present in query
+        const indexOptions: any = {};
+        if (index.keys.length > 1) {
+          const finalField = index.keys[index.keys.length - 1].field;
+          if (query[finalField] !== undefined) {
+            // Add the final field filter to options so IndexEntry.toArray can filter
+            indexOptions[finalField] = typeof query[finalField] === 'object'
+              ? query[finalField]
+              : { $eq: query[finalField] };
+          }
+        }
+        
+        const idsSet = new Set<string>();
+        
+        // Collect all matching IDs from index
+        for (const key of indexKeys) {
+          const ids = await index.findIdsForKey(key, indexOptions);
+          ids.forEach(id => idsSet.add(id));
+        }
+        
+        // Return documents with matching IDs
+        return this.documents.filter(doc => 
+          doc._id && idsSet.has(doc._id.toString())
+        ) as WithId<T>[];
+      }
+    }
+    
+    // No index available, return all documents for filtering
     return Promise.resolve(this.documents.map(a=>a) as WithId<T>[]);
   }
 

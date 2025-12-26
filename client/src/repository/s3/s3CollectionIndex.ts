@@ -1,8 +1,8 @@
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
-import { BaseCollectionIndex, IndexEntry } from '../collectionIndex';
+import { BaseCollectionIndex, IndexEntry, IndexOptions } from '../collectionIndex';
 import { MongoNetworkError } from './s3CollectionStore';
-import { getLogger } from '../../index';
+import { FindOptions, getLogger } from '../../index';
 
 
 /**
@@ -102,12 +102,12 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         cachedEntry.update(data, etag);
         return cachedEntry;
       }
-      const entry = new IndexEntry(data, etag);
+      const entry = this.createEntry(data, etag);
       this.indexEntryCache.set(key, entry); // Cache the entry for future use
       return entry;
     } catch (err: any) {
       // Not found, start with empty
-      return new IndexEntry();
+      return this.createEntry();
     }
   }
 
@@ -243,11 +243,11 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * Find document IDs for a given index key (loads index entry file at most once per key).
    * @param key Index key
    */
-  async findIdsForKey(key: string): Promise<string[]> {
+  async findIdsForKey(key: string, options?: IndexOptions): Promise<string[]> {
     try {
       const entry = await this.fetch(key);
       // logger not available here; consider injecting if needed for debug
-      return entry.toArray();
+      return entry.toArray(options);
     } catch (err: any) {
       if( err.name === 'NoSuchKey') {
         return []; // No such key, return empty array
