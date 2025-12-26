@@ -5,6 +5,7 @@ import { FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
 import logger, { Follower } from 'clox';
 import { sort, Sort } from '../util/sort.js';
+import { evaluateComparison } from './expression.js';
 
 export type FindOptions = {
   sort?: Sort;
@@ -175,59 +176,17 @@ export class SengoCollection<T> {
 
 function match(parsed: Record<string, any>, k: string, v: any): unknown {
   const foundValue = parsed[k];
-  if(v !== undefined && v !== null) {
-    if(v.$in) {
-      if(k === "_id") {
-        v.$in = v.$in.map((id: any) => id.toString());
-      }
-      if(Array.isArray(foundValue)) { 
-        return v.$in.some((item: unknown) => foundValue.includes(item));
-      }
-      return v.$in.includes(foundValue);
-    }
-    if(v.$nin) {
-      if(k === "_id") {
-        v.$nin = v.$nin.map((id: any) => id.toString());
-      }
-      if(Array.isArray(foundValue)) {
-        return !v.$nin.some((item: unknown) => foundValue.includes(item));
-      }
-      return !v.$nin.includes(foundValue);
-    }
-    if(v.$or) {
-      return matchesOrArray(parsed, v.$or);
-    }
-    if(k === '$or') {
-      return matchesOrArray(parsed, v);
-    }
-    if(v.$eq != undefined) {
-      v = v.$eq;
-      // fall through to equality check
-    }
-    if(v.$ne != undefined) {
-      return foundValue !== v.$ne;
-    }
-    if(v.$gt != undefined) {
-      return foundValue > v.$gt;
-    }
-    if(v.$gte != undefined) {
-      return foundValue >= v.$gte;
-    }
-    if(v.$lt != undefined) {
-      return foundValue < v.$lt;
-    }
-    if(v.$lte != undefined) {
-      return foundValue <= v.$lte;
-    }
-    if(v.$exists != undefined) {
-      const exists = foundValue !== undefined && foundValue !== null && foundValue !== '';
-      return v.$exists ? exists : !exists;
-    }
+  
+  // Handle special $or operator
+  if (v?.$or) {
+    return matchesOrArray(parsed, v.$or);
   }
-  if(Array.isArray(foundValue)) { 
-    return foundValue.includes(v) || foundValue.map(fv => fv?.toString()).includes(v?.toString());
+  if (k === '$or') {
+    return matchesOrArray(parsed, v);
   }
-  return foundValue?.toString() === v?.toString();
+  
+  // Use centralized comparison evaluation
+  return evaluateComparison(foundValue, v, k);
 }
 
 function matchesOrArray(parsed: Record<string, any>, arr: unknown): boolean {

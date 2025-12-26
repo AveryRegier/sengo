@@ -2,6 +2,7 @@ import { IndexDefinition, IndexKeyRecord, Order } from "../types";
 import { MongoInvalidArgumentError, MongoServerError } from '../errors.js';
 import type { NormalizedIndexKeyRecord } from "./index.js";
 import { SortDirection } from "../util/sort";
+import { ComparisonOperators, getComparisonFn } from '../client/expression.js';
 
 export interface CollectionIndex {
   name: string;
@@ -19,18 +20,6 @@ export interface CollectionIndex {
   getStatus?(): { pendingInserts: number; runningTasks: number; avgPersistMs: number; estTimeToClearMs: number };
   flush(): Promise<void>;
 }
-
-export type ComparisonOperators = {
-  $gt?: number | Date | string;
-  $lt?: number | Date | string;
-  $gte?: number | Date | string;
-  $lte?: number | Date | string;
-  $eq?: number | Date | string | null;
-  $ne?: number | Date | string | null;
-  $in?: Array<number | Date | string | null>;
-  $nin?: Array<number | Date | string | null>;
-  $exists?: boolean;
-};
 
 export type IndexOptions = {
   [key: string]: ComparisonOperators | SortDirection | number | undefined | { [key: string]: SortDirection };
@@ -218,7 +207,7 @@ export class IndexEntry {
               return res.filter(id => {
                 const sortValue = this.sortValues.get(id);
                 return Object.entries(opts as ComparisonOperators).every(([op, val]) => {
-                  const compareFn = IndexEntry.getComparisonFn(op);
+                  const compareFn = getComparisonFn(op);
                   return compareFn(sortValue, val);
                 }); 
               });
@@ -232,43 +221,6 @@ export class IndexEntry {
       }
     }
     return [...this.ids];
-  }
-
-  private static getComparisonFn(op: string): (a: any, b: any) => boolean {
-    let fn: (a: any, b: any) => boolean;
-    switch (op) {
-      case '$lt':
-        fn = (a, b) => a < b;
-        break;
-      case '$lte':
-        fn = (a, b) => a <= b;
-        break;
-      case '$gt':
-        fn = (a, b) => a > b;
-        break;
-      case '$gte':
-        fn = (a, b) => a >= b;
-        break;
-      case '$eq':
-        fn = (a, b) => a === b;
-        break;
-      case '$ne':
-        fn = (a, b) => a !== b;
-        break;
-      case '$exists':
-        fn = (a, b) => a === undefined || a === null || a === '' ? !b : b;
-        break;
-      case "$in":
-        fn = (a, b) => Array.isArray(b) ? b.includes(a) : false;
-        break;
-      case "$nin":
-        fn = (a, b) => Array.isArray(b) ? !b.includes(a) : true;
-        break;
-      default:
-        fn = (a, b) => true;
-        break;
-    }
-    return fn;
   }
 
   private deserialize(serialized: string) {
