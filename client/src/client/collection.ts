@@ -185,6 +185,15 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
       }
       return v.$in.includes(foundValue);
     }
+    if(v.$nin) {
+      if(k === "_id") {
+        v.$nin = v.$nin.map((id: any) => id.toString());
+      }
+      if(Array.isArray(foundValue)) {
+        return !v.$nin.some((item: unknown) => foundValue.includes(item));
+      }
+      return !v.$nin.includes(foundValue);
+    }
     if(v.$or) {
       return matchesOrArray(parsed, v.$or);
     }
@@ -194,6 +203,25 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
     if(v.$eq != undefined) {
       v = v.$eq;
       // fall through to equality check
+    }
+    if(v.$ne != undefined) {
+      return foundValue !== v.$ne;
+    }
+    if(v.$gt != undefined) {
+      return foundValue > v.$gt;
+    }
+    if(v.$gte != undefined) {
+      return foundValue >= v.$gte;
+    }
+    if(v.$lt != undefined) {
+      return foundValue < v.$lt;
+    }
+    if(v.$lte != undefined) {
+      return foundValue <= v.$lte;
+    }
+    if(v.$exists != undefined) {
+      const exists = foundValue !== undefined && foundValue !== null && foundValue !== '';
+      return v.$exists ? exists : !exists;
     }
   }
   if(Array.isArray(foundValue)) { 

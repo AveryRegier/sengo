@@ -20,21 +20,25 @@ export interface CollectionIndex {
   flush(): Promise<void>;
 }
 
+export type ComparisonOperators = {
+  $gt?: number | Date | string;
+  $lt?: number | Date | string;
+  $gte?: number | Date | string;
+  $lte?: number | Date | string;
+  $eq?: number | Date | string | null;
+  $ne?: number | Date | string | null;
+  $in?: Array<number | Date | string | null>;
+  $nin?: Array<number | Date | string | null>;
+  $exists?: boolean;
+};
+
 export type IndexOptions = {
-  [key: string]: {
-    $gt?: number | Date, 
-    $lt?: number | Date, 
-    $gte?: number | Date, 
-    $lte?: number | Date,
-    $eq?: number | Date | string | null,
-    $ne?:  number | Date | string | null,
-    $exists?: boolean
-  }
+  [key: string]: ComparisonOperators | SortDirection | number | undefined | { [key: string]: SortDirection };
 } & {
   sort?: {
-    [key: string]: SortDirection
-  },
-  limit? : number
+    [key: string]: SortDirection;
+  };
+  limit?: number;
 };
 
 export class IndexEntry {
@@ -202,17 +206,24 @@ export class IndexEntry {
       }
       if(requestedSortKeys.length === 0) {
         // all sort keys matched, we can apply limit/filters
+        // For compound indexes, we can only filter on the final indexed field (the sort key)
+        // because that's the only field value we have stored in sortValues
+        const finalField = this.keys[this.keys.length - 1].field;
         let results = Object.entries(options)
-          // we can only apply limits here for keys that exist in this index
-          .filter(([k])=>this.keys.find(key=>key.field === k))
+          // we can only apply filters here for the final indexed key
+          .filter(([k])=> k === finalField)
           .reduce((res, [k, opts]) => {
-            return res.filter(id => {
-              const sortValue = this.sortValues.get(id);
-              return Object.entries(opts).every(([op, val]) => {
-                const compareFn = IndexEntry.getComparisonFn(op);
-                return compareFn(sortValue, val);
-              }); 
-            });
+            // Type guard: ensure opts is ComparisonOperators (object with operator keys)
+            if (typeof opts === 'object' && opts !== null && !Array.isArray(opts)) {
+              return res.filter(id => {
+                const sortValue = this.sortValues.get(id);
+                return Object.entries(opts as ComparisonOperators).every(([op, val]) => {
+                  const compareFn = IndexEntry.getComparisonFn(op);
+                  return compareFn(sortValue, val);
+                }); 
+              });
+            }
+            return res;
           }, this.ids);
         if(options.limit !== undefined && options.limit > 0)
           results = results.slice(0, options.limit);
