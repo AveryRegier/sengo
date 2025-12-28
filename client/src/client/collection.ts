@@ -172,6 +172,37 @@ export class SengoCollection<T> {
     }
     return fields || 'default_index';
   }
+
+  /**
+   * List all indexes on the collection (MongoDB compatible: listIndexes / getIndexes)
+   * Returns an array of index specifications including the default _id index.
+   */
+  async listIndexes(): Promise<Array<{ v: number; key: Record<string, number>; name: string }>> {
+    const indexes: Array<{ v: number; key: Record<string, number>; name: string }> = [];
+    
+    // MongoDB always has an _id index
+    indexes.push({
+      v: 2,
+      key: { _id: 1 },
+      name: '_id_'
+    });
+
+    // Add all user-created indexes
+    const storeIndexes = await this.store.getIndexes();
+    for (const [name, index] of storeIndexes) {
+      const key: Record<string, number> = {};
+      for (const { field, order } of index.keys) {
+        key[field] = order as number;  // Order is 1 | -1 | 'text', cast to number for MongoDB format
+      }
+      indexes.push({
+        v: 2,
+        key,
+        name
+      });
+    }
+
+    return indexes;
+  }
 }
 
 function match(parsed: Record<string, any>, k: string, v: any): unknown {

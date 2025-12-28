@@ -3,6 +3,8 @@ import { MongoInvalidArgumentError, MongoServerError } from '../errors.js';
 import type { NormalizedIndexKeyRecord } from "./index.js";
 import { SortDirection } from "../util/sort";
 import { ComparisonOperators, getComparisonFn } from '../client/expression.js';
+import logger from "../client/logger";
+import { addContext, addContexts, MetaDataValue } from "clox";
 
 export interface CollectionIndex {
   name: string;
@@ -158,13 +160,15 @@ export class IndexEntry {
   // used by searches
   public toArray(options: IndexOptions = {}): string[] {
     // Return copy of ids array (already maintained in sorted order)
+    const workingIds = [...this.ids];
     if(options && Object.keys(options).length > 0) {
+      logger.debug('IndexEntry.toArray called with options:', { options: options as MetaDataValue });
       
       // Apply in-memory filtering based on options (e.g., sort and limit)
       // There is a specific optimization where sorting only _id with a limit can reduce the number of documents to load
       if(options.sort?._id && Object.keys(options.sort).length === 1 && options.limit) {
         // Sort by _id only
-        return this.ids.sort((a, b) => {
+        return workingIds.sort((a, b) => {
           if (a < b) return options.sort!._id === 1 ? -1 : 1;
           if (a > b) return options.sort!._id === 1 ? 1 : -1;
           return 0;
@@ -173,27 +177,28 @@ export class IndexEntry {
       
       // The whole point of all this code is to avoid loading documents if we can
       // eliminate them based on information we have in the index entry.
-      let requestedSortKeys = Object.keys(options)
-        .filter(k => k !== 'limit')
-        .filter(k => options.sort?.[k] !== undefined);
-      if(requestedSortKeys[0] === this.keys[0].field) {
-        requestedSortKeys.shift(); // remove primary key
-      }
-      for (let idx = 0; requestedSortKeys.length > 0 && idx < this.keys.length; idx++) {
-        const key = this.keys[idx];
-        // The sort of the primary key is irrelevant.
-        // The sort of the index must match the sort of the query
-        const currentKey = requestedSortKeys.shift();
-        if(key.field === currentKey) {
-          // validate the sort direction is the same
-          if(options.sort?.[key.field] === key.order) {
-            continue; // same order, no change needed
-          }
-        } else {
-          break; // no more relevant sort keys
+      // For compound indexes, only the FINAL field is used for sorting (stored in sortValues).
+      // Non-final fields are used to select which index entry to fetch.
+      let requestedSortKeys = options.sort ? Object.keys(options.sort).filter(k => k !== '_id') : [];
+      
+      // Check if we're sorting by the final indexed field
+      const finalIndexField = this.keys[this.keys.length - 1].field;
+      let needsReversal = false;
+      let canOptimize = false;
+      
+      if (requestedSortKeys.length === 1 && requestedSortKeys[0] === finalIndexField) {
+        // Sorting by the final indexed field - we can optimize
+        canOptimize = true;
+        if (options.sort![finalIndexField] === -this.keys[this.keys.length - 1].order) {
+          // Opposite direction - need to reverse
+          needsReversal = true;
         }
+      } else if (requestedSortKeys.length === 0) {
+        // No sort requested, but we can still apply filters/limit on the indexed order
+        canOptimize = true;
       }
-      if(requestedSortKeys.length === 0) {
+      addContexts({ canOptimize, needsReversal });
+      if(canOptimize) {
         // all sort keys matched, we can apply limit/filters
         // For compound indexes, we can only filter on the final indexed field (the sort key)
         // because that's the only field value we have stored in sortValues
@@ -213,19 +218,24 @@ export class IndexEntry {
               });
             }
             return res;
-          }, this.ids);
+          }, workingIds);
+        
+        // Apply reversal if needed BEFORE applying limit
+        if (needsReversal) {
+          results = workingIds.reverse();
+        }
+        
         if(options.limit !== undefined && options.limit > 0)
           results = results.slice(0, options.limit);
 
         return results;
       }
     }
-    return [...this.ids];
+    return workingIds;
   }
 
   private deserialize(serialized: string) {
     const parsed = JSON.parse(serialized);
-    
     this.ids = [];
     this.sortValues.clear();
     
@@ -298,14 +308,27 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
    * Get a score for how well this index matches the query.
    * Higher score = more specific index = better match.
    * Score is the number of non-final keys (fields that form the storage key).
+   * Bonus points if the index's final field matches the sort field.
    */
-  public scoreForQuery(query: Record<string, any>): number {
+  public scoreForQuery(query: Record<string, any>, options?: any): number {
     if (!this.canSatisfyQuery(query)) {
       return 0;
     }
-    // Score is based on number of non-final keys (more specific = better)
+    // Base score is number of non-final keys (more specific = better)
     const nonFinalKeys = this.keys.length > 1 ? this.keys.slice(0, -1) : this.keys;
-    return nonFinalKeys.length;
+    let score = nonFinalKeys.length;
+    
+    // Add bonus if this index's final field matches the sort field
+    // This makes compound indexes preferred when sorting by the final field
+    if (options?.sort && this.keys.length > 0) {
+      const finalIndexField = this.keys[this.keys.length - 1].field;
+      const sortFields = Object.keys(options.sort);
+      if (sortFields.length > 0 && sortFields[0] === finalIndexField) {
+        score += 10; // Large bonus to strongly prefer indexes that support the sort
+      }
+    }
+    
+    return score;
   }
 
   /**

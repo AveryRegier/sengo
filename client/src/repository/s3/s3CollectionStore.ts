@@ -16,6 +16,8 @@ import { WithId } from '../../types.js';
 import { getLogger } from '../../client/logger.js';
 import { get } from 'http';
 import { FindOptions } from '../../index.js';
+import { addContext } from 'clox';
+import { sort } from '../../util/sort.js';
 
 export interface S3CollectionStoreOptions {
   region?: string;
@@ -155,12 +157,13 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   /**
    * Find the best matching index for the query.
    * Uses the index scoring logic from the base class.
+   * Prefers indexes that match both query fields and sort fields.
    */
-  private findBestIndex(query: Record<string, any>): S3CollectionIndex | undefined {
+  private findBestIndex(query: Record<string, any>, options?: FindOptions): S3CollectionIndex | undefined {
     let bestIndex: S3CollectionIndex | undefined;
     let bestScore = 0;
     for (const index of this.loadedIndexes.values()) {
-      const score = index.scoreForQuery(query);
+      const score = index.scoreForQuery(query, options);
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -183,34 +186,40 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     
     await this.ensureIndexesLoaded();
     let queryForIndex = combineOrConditions(query);
-    const index = this.findBestIndex(queryForIndex);
+    const index = this.findBestIndex(queryForIndex, options);
+    addContext("index", index ? index.name : "none");
     if (index) {
       const indexKeyValues = index.findKeysForQuery(queryForIndex);
       // If findKeysForQuery returns empty array, index can't be used (missing required fields)
       if (indexKeyValues.length > 0) {
         // Build index options including filters for the final indexed field if present in query
-        const indexOptions: any = { ...options };
-        if (index.keys.length > 1) {
-          const finalField = index.keys[index.keys.length - 1].field;
-          if (queryForIndex[finalField] !== undefined) {
-            // Add the final field filter to options so IndexEntry.toArray can filter
-            indexOptions[finalField] = typeof queryForIndex[finalField] === 'object'
-              ? queryForIndex[finalField]
-              : { $eq: queryForIndex[finalField] };
-          }
-        }
+        const indexOptions: any = this.buildIndexOptions(options, index, queryForIndex);
         
-        const docsArrays = await Promise.all(
-          indexKeyValues.map(async key => {
+        const allIds = await Promise.all(indexKeyValues.map(async key => {
             let ids = await index.findIdsForKey(key, indexOptions);
-            const s3Keys = ids.map(this.id2key.bind(this));
-            return await this.loadTheseDocuments<T>(s3Keys);
-          })
-        );
-        return docsArrays.flat();
+            return ids;
+          })).then(arrays => arrays.flat());
+        const set = Array.from(new Set<string>(allIds)); // deduplicate
+        return this.loadTheseDocuments<T>(set.map(this.id2key.bind(this))).then(docs => {
+          return sort<WithId<T>>(indexOptions?.sort || {})(docs);
+        });
       }
     }
     return this.scan();
+  }
+
+  private buildIndexOptions(options: FindOptions | undefined, index: S3CollectionIndex, queryForIndex: Record<string, any>) {
+    const indexOptions: any = { ...options };
+    if (index.keys.length > 1) {
+      const finalField = index.keys[index.keys.length - 1].field;
+      if (queryForIndex[finalField] !== undefined) {
+        // Add the final field filter to options so IndexEntry.toArray can filter
+        indexOptions[finalField] = typeof queryForIndex[finalField] === 'object'
+          ? queryForIndex[finalField]
+          : { $eq: queryForIndex[finalField] };
+      }
+    }
+    return indexOptions;
   }
 
   private async loadRecordByKey(key: string): Promise<WithId<T> | null> {
@@ -266,7 +275,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
     const keys = listed.Contents.map(obj => obj.Key!);
 
-    return await this.loadTheseDocuments<T>(keys);
+    return this.loadTheseDocuments<T>(keys);
   }
 
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
@@ -290,7 +299,13 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     });
     // Expose last created index instance for test synchronization
     (this as any).lastIndexInstance = s3Index;
-    // Do not manually persist all index entries here
+    
+    // 3. Index all existing documents
+    const allDocs = await this.scan();
+    for (const doc of allDocs) {
+      await s3Index.addDocument(doc);
+    }
+    
     this.loadedIndexes.set(name, s3Index);
     return s3Index;
   }
@@ -334,16 +349,14 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   }
 
   private async loadTheseDocuments<T>(keys: string[]): Promise<WithId<T>[]> {
-    const docs = await Promise.all(keys.map(async key => {
+    return Promise.all(keys.map(async key => {
       try {
         return await this.loadRecordByKey(key);
       } catch (err: any) {
         if (err.name === 'NoSuchKey') return null; // Not found
         throw err; // Re-throw other errors
       }
-    }))
-    // Filter out nulls (not found)
-    return docs.filter(doc => doc !== null) as WithId<T>[];
+    })).then(docs => docs.filter(doc => doc !== null) as WithId<T>[]);
   }
 
   /**

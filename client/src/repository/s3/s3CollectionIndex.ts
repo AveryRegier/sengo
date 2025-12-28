@@ -137,13 +137,17 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         entry.dirty = false;
         return;
       } catch (err: any) {
-        if (err.$metadata?.httpStatusCode === 412) {
+        // S3 returns 409 (ConditionalRequestConflict) when If-Match fails
+        // Also handle 412 (PreconditionFailed) for compatibility
+        if (err.$metadata?.httpStatusCode === 409 || err.$metadata?.httpStatusCode === 412 || err.Code === 'ConditionalRequestConflict') {
           // ETag mismatch, refetch and retry
+          getLogger().warn(`ETag conflict detected for ${s3Key}, refetching and retrying (attempt ${tryCount + 1}/3)`);
           const fresh = await this.fetch(key);
           entry.update(fresh.serialize(), fresh.etag);
           tryCount++;
           continue;
         }
+        getLogger().error(`Failed to persist index entry to S3 for ${s3Key}: ${err.message}`, { error: err });
         throw err;
       }
     }
@@ -246,7 +250,6 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   async findIdsForKey(key: string, options?: IndexOptions): Promise<string[]> {
     try {
       const entry = await this.fetch(key);
-      // logger not available here; consider injecting if needed for debug
       return entry.toArray(options);
     } catch (err: any) {
       if( err.name === 'NoSuchKey') {

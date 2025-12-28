@@ -34,10 +34,8 @@ describe('SengoCollection with compound index', () => {
     await collection.insertOne({ name: 'Task 7', category: 'shopping', priority: 1, status: 'active' });
     await collection.insertOne({ name: 'Task 8', category: 'shopping', priority: 2, status: 'completed' });
 
-    // Create compound index: category (string) + priority (number)
+    // Create compound index on category + priority
     await collection.createIndex({ category: 1, priority: 1 });
-    // await collection.createIndex({ category: 1 });
-    // await collection.createIndex({ priority: 1 });
     
     s3sim.clearLogs();
   });
@@ -153,5 +151,38 @@ describe('SengoCollection with compound index', () => {
 
     // Should only load 1 document from S3
     expect(documentGets.length).toBe(1);
+  });
+
+  it('prefers compound index when sort matches final field', async () => {
+    // Clear logs to track only this query
+    s3sim.clearLogs();
+
+    // Query by category with sort on priority (final field of compound index)
+    // Both category_1 and category_1_priority_1 indexes match the query,
+    // but category_1_priority_1 should be preferred because it supports the sort
+    const results = await collection.find({ category: 'work' }, { sort: { priority: -1 } }).toArray();
+
+    // Validate correct results and sort order
+    expect(results).toHaveLength(3);
+    expect(results.every(doc => doc.category === 'work')).toBe(true);
+    
+    // Check if results are sorted correctly
+    expect(results.map(doc => doc.priority)).toEqual([3, 2, 1]);
+    expect(results.map(doc => doc.name)).toEqual(['Task 3', 'Task 2', 'Task 1']);
+
+    // Verify compound index was used (not the single-field category index)
+    const logs = s3sim.getLogs();
+    const indexAccesses = logs.filter(log => 
+      (log.command === 'getObject' || log.command === 'headObject') && log.key.includes('/indices/'));
+    
+    // At least one index should be accessed
+    expect(indexAccesses.length).toBeGreaterThan(0);
+    
+    // Should use the compound index (category_1_priority_1), not just the single-field category_1
+    expect(indexAccesses.some(log => log.key.includes('category_1_priority_1'))).toBe(true);
+
+    // Should only load 3 documents from S3
+    const documentGets = logs.filter(log => log.command === 'getObject' && log.key.includes('/data/'));
+    expect(documentGets.length).toBe(3);
   });
 });

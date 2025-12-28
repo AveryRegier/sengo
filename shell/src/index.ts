@@ -181,7 +181,10 @@ class SengoShell {
       this.rl.prompt();
       return;
     }
-    const [command, ...rest] = input.split(/\s+/);
+    
+    // Parse command and args more intelligently to preserve JSON
+    const { command, rest } = this.parseCommandLine(input);
+    
     // Always check for shell commands first (exit/quit/etc)
     if (command === 'exit' || command === 'quit') {
       try {
@@ -207,6 +210,87 @@ class SengoShell {
       getLogger().error(err, 'unable to run non-shell command', { command, line });
     }
     this.rl.prompt();
+  }
+
+  parseCommandLine(line: string): { command: string; rest: string[] } {
+    // Extract command (first word) and keep the rest as a single string
+    const match = line.match(/^(\S+)\s*(.*)$/);
+    if (!match) {
+      return { command: '', rest: [] };
+    }
+    const command = match[1];
+    const argsString = match[2].trim();
+    
+    if (!argsString) {
+      return { command, rest: [] };
+    }
+    
+    // Split arguments intelligently, preserving JSON structures
+    const args: string[] = [];
+    let current = '';
+    let inJson = false;
+    let braceCount = 0;
+    let inString = false;
+    let escapeNext = false;
+    
+    for (let i = 0; i < argsString.length; i++) {
+      const char = argsString[i];
+      
+      if (escapeNext) {
+        current += char;
+        escapeNext = false;
+        continue;
+      }
+      
+      if (char === '\\') {
+        current += char;
+        escapeNext = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        inString = !inString;
+        current += char;
+        continue;
+      }
+      
+      if (!inString) {
+        if (char === '{' || char === '[') {
+          if (!inJson) {
+            inJson = true;
+            braceCount = 0;
+          }
+          braceCount++;
+          current += char;
+          continue;
+        }
+        
+        if (char === '}' || char === ']') {
+          braceCount--;
+          current += char;
+          if (braceCount === 0) {
+            inJson = false;
+          }
+          continue;
+        }
+        
+        if (!inJson && /\s/.test(char)) {
+          if (current) {
+            args.push(current);
+            current = '';
+          }
+          continue;
+        }
+      }
+      
+      current += char;
+    }
+    
+    if (current) {
+      args.push(current);
+    }
+    
+    return { command, rest: args };
   }
 
   async handleClose() {
@@ -286,17 +370,22 @@ class SengoShell {
       }
       const fn = (shell.currentCollection as any)[command];
       if (typeof fn === 'function') {
-        const parsedArgs = shell.parseArgsWithJson(rest);
-        getLogger().info('Executing command', { command, args: parsedArgs });
-        if (shell.debugMode) {
-          console.log('[DEBUG] Arguments:', JSON.stringify(parsedArgs, null, 2));
-        }
-        const result = await fn.apply(shell.currentCollection, parsedArgs);
-        if(result?.toArray && typeof result.toArray === 'function') {
-          const docs = await result.toArray();
-          console.log(JSON.stringify(docs, null, 2));
-        } else if (result !== undefined) {
-          console.log(JSON.stringify(result, null, 2));
+        try {
+          const parsedArgs = shell.parseArgsWithJson(rest);
+          getLogger().info('Executing command', { command, args: parsedArgs });
+          if (shell.debugMode) {
+            console.log('[DEBUG] Arguments:', JSON.stringify(parsedArgs, null, 2));
+          }
+          const result = await fn.apply(shell.currentCollection, parsedArgs);
+          if(result?.toArray && typeof result.toArray === 'function') {
+            const docs = await result.toArray();
+            console.log(JSON.stringify(docs, null, 2));
+          } else if (result !== undefined) {
+            console.log(JSON.stringify(result, null, 2));
+          }
+        } catch (err: any) {
+          console.error(`Error executing ${command}:`, err.message || err);
+          getLogger().error(err, `Error executing ${command}`, { command, args: rest });
         }
       } else {
         console.log(`Unknown command or method: ${command}`);

@@ -67,10 +67,10 @@ describe('IndexEntry optimization with $limit and comparison operators', () => {
       entry.add('id2', 20);
       entry.add('id3', 30);
       
-      // Query sorts descending, but index is ascending
-      // The logic still applies limit after sort validation fails
+      // Query sorts descending on final field, index is ascending
+      // Should reverse and apply limit correctly
       const result = entry.toArray({ sort: { priority: -1 }, limit: 2 });
-      expect(result).toEqual(['id1', 'id2']); // First 2 after optimization fails
+      expect(result).toEqual(['id3', 'id2']); // Descending: 30, 20
     });
   });
 

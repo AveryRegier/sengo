@@ -56,12 +56,13 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
   /**
    * Find the best matching index for the query.
    * Uses the index scoring logic from the base class.
+   * Prefers indexes that match both query fields and sort fields.
    */
-  private findBestIndex(query: Record<string, any>): MemoryCollectionIndex | undefined {
+  private findBestIndex(query: Record<string, any>, options?: any): MemoryCollectionIndex | undefined {
     let bestIndex: MemoryCollectionIndex | undefined;
     let bestScore = 0;
     for (const index of this.indexes.values()) {
-      const score = index.scoreForQuery(query);
+      const score = index.scoreForQuery(query, options);
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -70,11 +71,11 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     return bestIndex;
   }
 
-  async findCandidates(query: Record<string, any>): Promise<WithId<T>[]> {
+  async findCandidates(query: Record<string, any>, options?: any): Promise<WithId<T>[]> {
     this.checkClosure();
     
     // Try to use an index if available
-    const index = this.findBestIndex(query);
+    const index = this.findBestIndex(query, options);
     if (index) {
       const indexKeys = index.findKeysForQuery(query);
       // If findKeysForQuery returns empty array, index can't be used (missing required fields)
