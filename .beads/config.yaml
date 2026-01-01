@@ -60,3 +60,7 @@
 # - linear.api-key
 # - github.org
 # - github.repo
+
+# Fork mode: when false, this is the upstream/original repository
+# When true, prevents committing issues.jsonl to avoid polluting upstream
+fork-mode: false
