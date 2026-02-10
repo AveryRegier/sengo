@@ -1,6 +1,15 @@
 import { SengoClient, SengoCollection, SengoDb, getLogger, setLogLevel } from 'sengo';
 import * as readline from 'node:readline';
-import { parseArgsWithJson, parseCommandLine } from './parser.js';
+import { parseCommandLine } from './parser.js';
+import {
+  ConnectCommand,
+  CloseCommand,
+  UseCommand,
+  ExitCommand,
+  HelpCommand,
+  DebugCommand,
+  defaultCommand
+} from './commands/index.js';
 
 export class ShellContext {
   client: SengoClient | null = null;
@@ -8,140 +17,7 @@ export class ShellContext {
   currentCollection: SengoCollection<any> | null = null;
 }
 
-class ConnectCommand {
-  name: string;
-  description: string;
-  
-  constructor() {
-    this.name = 'connect';
-    this.description = 'Connect to a repository. Usage: connect <repositoryType>';
-  }
-  async run(args: any[], shell: ShellContext) {
-    const [repoType] = args;
-    if (shell.client) {
-      console.log('Already connected. Please close the current client first.');
-    } else {
-      shell.client = new SengoClient();
-      shell.db = shell.client.db(repoType);
-      shell.currentCollection = null;
-      console.log(`Connected to repository: ${repoType || 'memory'}`);
-    }
-  }
-}
-
-class CloseCommand {
-    name: string;
-    description: string;
-  constructor() {
-    this.name = 'close';
-    this.description = 'Close the current client connection.';
-  }
-    async run(_args: string[], shell: SengoShell) {
-    if (shell.client) {
-      await shell.client.close();
-      shell.client = null;
-      shell.currentCollection = null;
-      console.log('Client closed.');
-    } else {
-      console.log('No client to close.');
-    }
-  }
-}
-
-class UseCommand {
-    name: string;
-    description: string;
-  constructor() {
-    this.name = 'use';
-    this.description = 'Select a collection. Usage: use <collectionName>';
-  }
-    async run(args: string[], shell: SengoShell) {
-    const [collectionName] = args;
-    if (!shell.db) {
-      console.log('Not connected. Use connect <repositoryType> first.');
-    } else if (!collectionName) {
-      console.log('Usage: use <collectionName>');
-    } else {
-      shell.currentCollection = shell.db.collection(collectionName);
-      console.log(`Using collection: ${collectionName}`);
-    }
-  }
-}
-
-class ExitCommand {
-    name: string;
-    description: string;
-  constructor() {
-    this.name = 'exit';
-    this.description = 'Exit the Sengo shell.';
-  }
-    async run(_args: string[], shell: SengoShell) {
-    if (shell.exiting) return;
-    shell.exiting = true;
-    if (shell.client) await shell.client.close();
-    console.log('Goodbye!');
-    shell.rl.close();
-    process.exit(0);
-  }
-}
-
-class HelpCommand {
-    name: string;
-    description: string;
-  constructor() {
-    this.name = 'help';
-    this.description = 'Show help for all commands.';
-  }
-    async run(_args: string[], shell: SengoShell) {
-    console.log('Available commands:');
-    for (const cmdName of Object.keys(shell.commands)) {
-      const cmd = shell.commands[cmdName];
-      if (cmd && cmd.description) {
-        console.log(`  ${cmdName.padEnd(8)} - ${cmd.description}`);
-      }
-    }
-    // Show dynamic collection methods if a collection is selected
-    if (shell.currentCollection) {
-      const proto = Object.getPrototypeOf(shell.currentCollection);
-      const methodNames = Object.getOwnPropertyNames(proto)
-        .filter(
-          name =>
-            typeof (shell.currentCollection as any)[name] === 'function' &&
-            name !== 'constructor' &&
-            !name.startsWith('_') // Only public methods
-        );
-      if (methodNames.length) {
-        console.log('\nCollection methods:');
-        for (const name of methodNames) {
-          console.log(`  ${name}`);
-        }
-      }
-    }
-  }
-}
-
-class DebugCommand {
-    name: string;
-    description: string;
-  constructor() {
-    this.name = 'debug';
-    this.description = 'Enable or disable debug mode. Usage: debug [on|off]';
-  }
-    run(args: string[], shell: SengoShell) {
-    const arg = args[0]?.toLowerCase();
-    if (arg === 'off') {
-      shell.debugMode = false;
-      setLogLevel('error');
-      console.log('Debug mode OFF');
-    } else {
-      shell.debugMode = true;
-      setLogLevel('debug');
-      console.log('Debug mode ON');
-    }
-  }
-}
-
-class SengoShell {
+export class SengoShell {
   client: SengoClient | null;
   db: SengoDb | null;
   public currentCollection: SengoCollection<any> | null;
@@ -220,47 +96,7 @@ class SengoShell {
     }
   }
 
-  defaultCommand = {
-    name: 'default',
-    description: 'Default command handler for collection methods.',
-  run: async (args: string[], shell: SengoShell) => {
-      const [command, ...rest] = args;
-      if (command === 'exit' || command === 'quit') {
-        await shell.commands[command].run(rest, shell);
-        return;
-      }
-      if (shell.commands[command]) {
-        await shell.commands[command].run(rest, shell);
-        return;
-      }
-      if (!shell.currentCollection) {
-        console.log(`Unknown command or method: ${command}`);
-        return;
-      }
-      const fn = (shell.currentCollection as any)[command];
-      if (typeof fn === 'function') {
-        try {
-          const parsedArgs = parseArgsWithJson(rest);
-          getLogger().info('Executing command', { command, args: parsedArgs });
-          if (shell.debugMode) {
-            console.log('[DEBUG] Arguments:', JSON.stringify(parsedArgs, null, 2));
-          }
-          const result = await fn.apply(shell.currentCollection, parsedArgs);
-          if(result?.toArray && typeof result.toArray === 'function') {
-            const docs = await result.toArray();
-            console.log(JSON.stringify(docs, null, 2));
-          } else if (result !== undefined) {
-            console.log(JSON.stringify(result, null, 2));
-          }
-        } catch (err: any) {
-          console.error(`Error executing ${command}:`, err.message || err);
-          getLogger().error(err, `Error executing ${command}`, { command, args: rest });
-        }
-      } else {
-        console.log(`Unknown command or method: ${command}`);
-      }
-    }
-  };
+  defaultCommand = defaultCommand;
 }
 
 new SengoShell();
@@ -274,7 +110,6 @@ export {
   SengoClient,
   SengoCollection,
   SengoDb,
-  SengoShell,
   getLogger,
   setLogLevel,
 };
