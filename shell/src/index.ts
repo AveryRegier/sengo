@@ -115,7 +115,6 @@ new SengoShell();
 
 // Example usage of setLogLevel
 setLogLevel('error');
-setLogLevel('debug');
 
 // Export any shell-specific functions or classes
 export {
