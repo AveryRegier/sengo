@@ -1,3 +1,5 @@
+import { getOperator } from './expr/index';
+
 /**
  * MongoDB-like query expression operators and evaluation functions.
  * This module centralizes all comparison operator definitions and logic.
@@ -35,28 +37,9 @@ export type ComparisonOperators = {
  * @returns A function that takes (actualValue, queryValue) and returns boolean
  */
 export function getComparisonFn(op: string): (a: any, b: any) => boolean {
-  switch (op) {
-    case '$lt':
-      return (a, b) => a < b;
-    case '$lte':
-      return (a, b) => a <= b;
-    case '$gt':
-      return (a, b) => a > b;
-    case '$gte':
-      return (a, b) => a >= b;
-    case '$eq':
-      return (a, b) => a === b;
-    case '$ne':
-      return (a, b) => a !== b;
-    case '$exists':
-      return (a, b) => a === undefined || a === null || a === '' ? !b : b;
-    case '$in':
-      return (a, b) => Array.isArray(b) ? b.includes(a) : false;
-    case '$nin':
-      return (a, b) => Array.isArray(b) ? !b.includes(a) : true;
-    default:
-      return () => true;
-  }
+  const operator = getOperator(op);
+  if (!operator) return () => true;
+  return (a, b) => operator.compare(a, b);
 }
 
 /**
@@ -74,73 +57,31 @@ export function evaluateComparison(foundValue: any, queryValue: any, fieldKey?: 
     return foundValue?.toString() === queryValue?.toString();
   }
 
-  // Handle $in operator
-  if (queryValue.$in !== undefined) {
-    let inValues = queryValue.$in;
-    // Special handling for _id field - convert to strings
-    if (fieldKey === '_id') {
-      inValues = inValues.map((id: any) => id.toString());
-    }
-    if (Array.isArray(foundValue)) {
-      return inValues.some((item: unknown) => foundValue.includes(item));
-    }
-    return inValues.includes(foundValue);
-  }
-
-  // Handle $nin operator
-  if (queryValue.$nin !== undefined) {
-    let ninValues = queryValue.$nin;
-    // Special handling for _id field - convert to strings
-    if (fieldKey === '_id') {
-      ninValues = ninValues.map((id: any) => id.toString());
-    }
-    if (Array.isArray(foundValue)) {
-      return !ninValues.some((item: unknown) => foundValue.includes(item));
-    }
-    return !ninValues.includes(foundValue);
-  }
-
-  // Handle $eq operator - fall through to equality check
-  let compareValue = queryValue;
-  if (queryValue.$eq !== undefined) {
-    compareValue = queryValue.$eq;
-  }
-
-  // Handle $ne operator
-  if (queryValue.$ne !== undefined) {
-    return foundValue !== queryValue.$ne;
-  }
-
-  // Handle $gt operator
-  if (queryValue.$gt !== undefined) {
-    return foundValue > queryValue.$gt;
-  }
-
-  // Handle $gte operator
-  if (queryValue.$gte !== undefined) {
-    return foundValue >= queryValue.$gte;
-  }
-
-  // Handle $lt operator
-  if (queryValue.$lt !== undefined) {
-    return foundValue < queryValue.$lt;
-  }
-
-  // Handle $lte operator
-  if (queryValue.$lte !== undefined) {
-    return foundValue <= queryValue.$lte;
-  }
-
-  // Handle $exists operator
-  if (queryValue.$exists !== undefined) {
-    const exists = foundValue !== undefined && foundValue !== null && foundValue !== '';
-    return queryValue.$exists ? exists : !exists;
+  if (isOperatorObject(queryValue)) {
+    return Object.entries(queryValue)
+      .filter(([key]) => key.startsWith('$'))
+      .every(([op, val]) => {
+        const operator = getOperator(op);
+        if (!operator) return true;
+        return operator.match(foundValue, val, fieldKey);
+      });
   }
 
   // Default equality check (handles arrays and primitives)
   if (Array.isArray(foundValue)) {
-    return foundValue.includes(compareValue) || 
-           foundValue.map(fv => fv?.toString()).includes(compareValue?.toString());
+    return (
+      foundValue.includes(queryValue) ||
+      foundValue.map((fv) => fv?.toString()).includes(queryValue?.toString())
+    );
   }
-  return foundValue?.toString() === compareValue?.toString();
+  return foundValue?.toString() === queryValue?.toString();
+}
+
+function isOperatorObject(value: any): value is Record<string, any> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).some((key) => key.startsWith('$'))
+  );
 }
