@@ -1,6 +1,6 @@
 import { SengoClient, SengoCollection, SengoDb, getLogger, setLogLevel } from 'sengo';
 import * as readline from 'node:readline';
-import { EJSON } from 'bson';
+import { parseArgsWithJson, parseCommandLine } from './parser.js';
 
 export class ShellContext {
   client: SengoClient | null = null;
@@ -183,7 +183,7 @@ class SengoShell {
     }
     
     // Parse command and args more intelligently to preserve JSON
-    const { command, rest } = this.parseCommandLine(input);
+    const { command, rest } = parseCommandLine(input);
     
     // Always check for shell commands first (exit/quit/etc)
     if (command === 'exit' || command === 'quit') {
@@ -212,143 +212,12 @@ class SengoShell {
     this.rl.prompt();
   }
 
-  parseCommandLine(line: string): { command: string; rest: string[] } {
-    // Extract command (first word) and keep the rest as a single string
-    const match = line.match(/^(\S+)\s*(.*)$/);
-    if (!match) {
-      return { command: '', rest: [] };
-    }
-    const command = match[1];
-    const argsString = match[2].trim();
-    
-    if (!argsString) {
-      return { command, rest: [] };
-    }
-    
-    // Split arguments intelligently, preserving JSON structures
-    const args: string[] = [];
-    let current = '';
-    let inJson = false;
-    let braceCount = 0;
-    let inString = false;
-    let escapeNext = false;
-    
-    for (let i = 0; i < argsString.length; i++) {
-      const char = argsString[i];
-      
-      if (escapeNext) {
-        current += char;
-        escapeNext = false;
-        continue;
-      }
-      
-      if (char === '\\') {
-        current += char;
-        escapeNext = true;
-        continue;
-      }
-      
-      if (char === '"') {
-        inString = !inString;
-        current += char;
-        continue;
-      }
-      
-      if (!inString) {
-        if (char === '{' || char === '[') {
-          if (!inJson) {
-            inJson = true;
-            braceCount = 0;
-          }
-          braceCount++;
-          current += char;
-          continue;
-        }
-        
-        if (char === '}' || char === ']') {
-          braceCount--;
-          current += char;
-          if (braceCount === 0) {
-            inJson = false;
-          }
-          continue;
-        }
-        
-        if (!inJson && /\s/.test(char)) {
-          if (current) {
-            args.push(current);
-            current = '';
-          }
-          continue;
-        }
-      }
-      
-      current += char;
-    }
-    
-    if (current) {
-      args.push(current);
-    }
-    
-    return { command, rest: args };
-  }
-
   async handleClose() {
     // Only call exit if not already exiting
     if (!this.exiting) {
       this.exiting = true;
       await this.commands.exit.run([], this);
     }
-  }
-
-  parseArgsWithJson(input: string[]) {
-    // Improved: parse multiple JSON objects from input, even if separated by spaces
-    const args: any[] = [];
-    let buffer = '';
-    let inJson = false;
-    let braceCount = 0;
-    for (let i = 0; i < input.length; i++) {
-      const token = input[i];
-      if (!inJson && (token.startsWith('{') || token.startsWith('['))) {
-        inJson = true;
-        braceCount = 0;
-        buffer = '';
-      }
-      if (inJson) {
-        buffer += (buffer ? ' ' : '') + token;
-        for (const char of token) {
-          if (char === '{' || char === '[') braceCount++;
-          if (char === '}' || char === ']') braceCount--;
-        }
-        if (braceCount === 0) {
-          // End of JSON object/array
-          try {
-            args.push(EJSON.parse(buffer));
-          } catch (err) {
-            const tmp = 'Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.';
-            console.error(tmp);
-            getLogger().error(err, tmp);
-            return [];
-          }
-          inJson = false;
-          buffer = '';
-        }
-      } else {
-        args.push(token);
-      }
-    }
-    // If buffer is not empty, try to parse last JSON
-    if (buffer) {
-      try {
-        args.push(EJSON.parse(buffer));
-      } catch (err) {
-        const tmp = 'Error: Parsing error: Only valid JSON or MongoDB Extended JSON is accepted.';
-        console.error(tmp);
-        getLogger().error(err, tmp);
-        return [];
-      }
-    }
-    return args;
   }
 
   defaultCommand = {
@@ -371,7 +240,7 @@ class SengoShell {
       const fn = (shell.currentCollection as any)[command];
       if (typeof fn === 'function') {
         try {
-          const parsedArgs = shell.parseArgsWithJson(rest);
+          const parsedArgs = parseArgsWithJson(rest);
           getLogger().info('Executing command', { command, args: parsedArgs });
           if (shell.debugMode) {
             console.log('[DEBUG] Arguments:', JSON.stringify(parsedArgs, null, 2));
