@@ -46,9 +46,21 @@ export class SengoShell {
       exit: new ExitCommand(),
       quit: new ExitCommand(),
     };
-    console.log('Welcome to the Sengo shell! Type "connect <repositoryType>" to begin.');
-    this.rl.prompt();
     this.rl.on('line', this.handleLine.bind(this)).on('close', this.handleClose.bind(this));
+    void this.initializeShell();
+  }
+
+  private async initializeShell() {
+    console.log('Welcome to the Sengo shell! Type "connect <repositoryType>" to begin.');
+    const bucket = process.env.S3_BUCKET?.trim();
+    if (bucket) {
+      try {
+        await this.commands.connect.run([bucket], this);
+      } catch (err) {
+        getLogger().error(err, 'unable to auto-connect to S3 bucket', { bucket });
+      }
+    }
+    this.rl.prompt();
   }
 
   async handleLine(line: string) {
