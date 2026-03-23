@@ -72,4 +72,124 @@ describe('SengoClient updateOne API (s3 backend)', () => {
     expect(bucketSim.getIndexAccessLogDetailed()
       .filter(entry => entry.command === 'putObject').length).toBe(0);
   });
+
+  it('keeps indexed array $in query results after updating a non-indexed field', async () => {
+    const client = new SengoClient();
+    const collection = client.db('s3').collection<{
+      _id: string;
+      memberId: string[];
+      deaconId: string[];
+      contactType: string;
+      summary: string;
+      contactDate: string;
+      followUpRequired: boolean;
+      createdAt: string;
+    }>('contacts_regression_memberid_index_update');
+
+    await collection.createIndex({ memberId: 1 });
+
+    const targetMemberId = 'member-target';
+    const inserted = await collection.insertOne({
+      _id: 'contact-1',
+      memberId: ['member-a', targetMemberId],
+      deaconId: ['deacon-1'],
+      contactType: 'visit',
+      summary: 'before update',
+      contactDate: '2026-03-01T00:00:00.000Z',
+      followUpRequired: false,
+      createdAt: '2026-03-01T00:00:00.000Z'
+    });
+
+    const before = await collection.find({ memberId: { $in: [targetMemberId] } }).toArray();
+    expect(before.length).toBe(1);
+    expect(before[0]._id).toBe(inserted.insertedId);
+
+    for (let i = 0; i < 50; i++) {
+      await collection.updateOne(
+        { _id: inserted.insertedId },
+        {
+          $set: {
+            // Re-send equal-valued arrays as a fresh payload, like actsix edit flow.
+            memberId: ['member-a', targetMemberId],
+            deaconId: ['deacon-1'],
+            contactDate: `2026-03-${String((i % 28) + 1).padStart(2, '0')}T17:00:00.000Z`,
+            summary: `after date edit #${i}`
+          }
+        }
+      );
+
+      const afterEachUpdate = await collection.find({ memberId: { $in: [targetMemberId] } }).toArray();
+      expect(afterEachUpdate.length).toBe(1);
+      expect(afterEachUpdate[0]._id).toBe(inserted.insertedId);
+    }
+
+    const after = await collection.find({ memberId: { $in: [targetMemberId] } }).toArray();
+    expect(after.length).toBe(1);
+    expect(after[0]._id).toBe(inserted.insertedId);
+  });
+
+  it('repro: can temporarily lose indexed array membership after update when add-back persist hits repeated conflicts', async () => {
+    const client = new SengoClient();
+    const collection = client.db('s3').collection<{
+      _id: string;
+      memberId: string[];
+      deaconId: string[];
+      contactType: string;
+      summary: string;
+      contactDate: string;
+      followUpRequired: boolean;
+      createdAt: string;
+    }>('contacts_regression_memberid_conflict_window');
+
+    await collection.createIndex({ memberId: 1 });
+
+    const targetMemberId = 'member-target';
+    const inserted = await collection.insertOne({
+      _id: 'contact-1',
+      memberId: ['member-a', targetMemberId],
+      deaconId: ['deacon-1'],
+      contactType: 'visit',
+      summary: 'before update',
+      contactDate: '2026-03-01T00:00:00.000Z',
+      followUpRequired: false,
+      createdAt: '2026-03-01T00:00:00.000Z'
+    });
+
+    const originalPutObject = bucketSim.putObject.bind(bucketSim);
+    let conflictCount = 0;
+    bucketSim.putObject = ((keyOrCmd: any, body?: string) => {
+      const key = typeof keyOrCmd === 'string' ? keyOrCmd : S3BucketSimulator.extractKey(keyOrCmd);
+      const resolvedBody = body !== undefined
+        ? body
+        : (typeof keyOrCmd === 'string' ? undefined : S3BucketSimulator.extractBody(keyOrCmd));
+
+      const isTargetIndex = !!key && key.includes('/indices/memberId_1/member-target.json');
+      const isAddBackWrite = resolvedBody === '["contact-1"]';
+      if (isTargetIndex && isAddBackWrite && conflictCount < 3) {
+        conflictCount += 1;
+        const err: any = new Error('ConditionalRequestConflict');
+        err.Code = 'ConditionalRequestConflict';
+        err.$metadata = { httpStatusCode: 409 };
+        throw err;
+      }
+
+      return originalPutObject(keyOrCmd, body as any);
+    }) as any;
+
+    await collection.updateOne(
+      { _id: inserted.insertedId },
+      {
+        $set: {
+          memberId: ['member-a', targetMemberId],
+          deaconId: ['deacon-1'],
+          contactDate: '2026-03-10T17:00:00.000Z',
+          summary: 'after date edit'
+        }
+      }
+    );
+
+    // Repro assertion: immediately after update the document should not disappear.
+    const immediate = await collection.find({ memberId: { $in: [targetMemberId] } }).toArray();
+    expect(immediate.length).toBe(1);
+  });
 });

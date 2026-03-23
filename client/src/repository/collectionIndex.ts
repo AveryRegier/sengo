@@ -89,6 +89,10 @@ export class IndexEntry {
     if (!this.added) {
       this.added = new Set();
     }
+    // Cancel out a previous remove in the same dirty cycle.
+    if (this.removed?.has(id)) {
+      this.removed.delete(id);
+    }
     this.added.add(id);
     this.dirty = true;
     return true;
@@ -117,6 +121,10 @@ export class IndexEntry {
       this.sortValues.delete(id);
       if (!this.removed) {
         this.removed = new Set();
+      }
+      // Cancel out a previous add in the same dirty cycle.
+      if (this.added?.has(id)) {
+        this.added.delete(id);
       }
       this.removed.add(id);
       this.dirty = true;

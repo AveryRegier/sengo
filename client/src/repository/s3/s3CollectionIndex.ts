@@ -129,7 +129,6 @@ export class S3CollectionIndex extends BaseCollectionIndex {
           Key: s3Key,
           Body: entry.serialize(),
           ContentType: 'application/json',
-          ...(entry.etag ? { IfMatch: entry.etag } : {}),
         };
         getLogger().debug(`Persisting index entry to S3`, { command: "putObject", args });
         const results = await this.s3.send(new PutObjectCommand(args));
