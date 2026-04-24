@@ -2,10 +2,9 @@
   "compilerOptions": {
     "target": "es2020",
     "lib": ["es2020"],
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "module": "Node16",
+    "moduleResolution": "node16",
     "types": ["node"],
-    "ignoreDeprecations": "6.0",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

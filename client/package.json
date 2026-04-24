@@ -6,6 +6,7 @@
   "main": "./build-cjs/index.js",
   "exports": {
     ".": {
+      "types": "./build-cjs/types/index.d.ts",
       "require": "./build-cjs/index.js"
     }
   },
