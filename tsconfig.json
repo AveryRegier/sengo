@@ -1,8 +1,11 @@
 {
   "compilerOptions": {
-    "target": "es2016",
+    "target": "es2020",
+    "lib": ["es2020"],
     "module": "esnext",
     "moduleResolution": "node",
+    "types": ["node"],
+    "ignoreDeprecations": "6.0",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

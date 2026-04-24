@@ -22,16 +22,16 @@
   "license": "Apache-2.0",
   "devDependencies": {
     "@types/chance": "^1.1.6",
-    "@types/node": "^24.0.4",
+    "@types/node": "^24.12.2",
     "@vitest/coverage-v8": "^3.2.4",
     "@vitest/ui": "^3.2.4",
     "aws-sdk-client-mock": "^4.1.0",
     "chance": "^1.1.13",
+    "clox": "../clox/dist",
     "rimraf": "^3.0.2",
-    "typescript": "^5.8.3",
     "semver": "^7.7.2",
-    "vitest": "^3.2.4",
-    "clox": "../clox/dist"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.839.0",
