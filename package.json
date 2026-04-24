@@ -10,7 +10,8 @@
     "clean": "rimraf --glob build && npm run clean --workspace=client && npm run clean --workspace=shell",
     "start": "npm run start --workspace=shell",
     "test": "npm run test --workspace=client && npm run test --workspace=shell",
-    "verify": "npm run clean && npm run build && npm test"
+    "verify": "npm run clean && npm run build && npm test",
+    "install-client-skill": "node scripts/install-sengo-client-skill.cjs"
   },
   "dependencies": {
     "@types/bson": "^4.0.5",
