@@ -307,6 +307,10 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
       if (!query.hasOwnProperty(key.field)) {
         return false;
       }
+
+      if (this.getLookupValues(query[key.field]) === null) {
+        return false;
+      }
     }
     
     return true;
@@ -427,13 +431,10 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
         // Stop here and return what we have so far
         return acc;
       }
-      
-      let newKeys: string[] = [];
-      if (valueToFind.$in) {
-        // Handle $in operator for this field
-        newKeys = valueToFind.$in.map((v: any) => `${v}`);
-      } else {
-        newKeys = [`${valueToFind}`];
+
+      const newKeys = this.getLookupValues(valueToFind);
+      if (newKeys === null) {
+        return [];
       }
       
       if (acc.length === 0) {
@@ -514,6 +515,26 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   protected hasFirstKey(doc: Record<string, any>): boolean {
     const value = doc[this.keys[0]?.field];
     return value !== undefined && value !== null && value !== '';
+  }
+
+  private getLookupValues(valueToFind: any): string[] | null {
+    if (valueToFind === undefined || valueToFind === null) {
+      return null;
+    }
+
+    if (typeof valueToFind === 'object' && !Array.isArray(valueToFind)) {
+      if (Array.isArray(valueToFind.$in)) {
+        return valueToFind.$in.map((v: any) => `${v}`);
+      }
+
+      if (valueToFind.$eq !== undefined) {
+        return [`${valueToFind.$eq}`];
+      }
+
+      return null;
+    }
+
+    return [`${valueToFind}`];
   }
 
   removeIdFromAllKeys<U>(id: string, doc: Record<string, any>): unknown {
