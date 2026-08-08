@@ -32,7 +32,7 @@ describe('Sengo Shell exit/quit commands', () => {
     { name: 'exit after use', cmds: ['connect', 'use test', 'exit'], expect: /Using collection: test[\s\S]*Goodbye!/, exit: true },
     { name: 'help before connect', cmds: ['help'], expect: /Available commands:[\s\S]*connect[\s\S]*close[\s\S]*use[\s\S]*help[\s\S]*exit[\s\S]*quit/, exit: false },
     { name: 'help after connect', cmds: ['connect', 'help'], expect: /Available commands:[\s\S]*connect[\s\S]*close[\s\S]*use[\s\S]*help[\s\S]*exit[\s\S]*quit/, exit: false },
-    { name: 'help after use', cmds: ['connect', 'use test', 'help'], expect: /Available commands:[\s\S]*connect[\s\S]*close[\s\S]*use[\s\S]*help[\s\S]*exit[\s\S]*quit/, exit: false }
+    { name: 'help after use', cmds: ['connect', 'use test', 'help'], expect: /Available commands:[\s\S]*connect[\s\S]*close[\s\S]*use[\s\S]*help[\s\S]*exit[\s\S]*quit[\s\S]*Collection methods:[\s\S]*find[\s\S]*findOne[\s\S]*insertOne/, exit: false }
   ];
 
   for (const { name, cmds, expect: expected, exit } of scenarios) {
