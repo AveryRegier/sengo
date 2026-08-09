@@ -82,21 +82,31 @@ Example output:
 ]
 ```
 
+## Installing the Shell Command
+
+From the repository root, run:
+
+```sh
+npm run install-shell-command
+```
+
+That builds the workspace and links the shell binary so `sengo` is available on your command line.
+
 ## Running the Shell CLI
 
-You can launch the interactive shell directly with:
+After the command is installed, launch the interactive shell with:
 
 ```sh
 npx sengo
 ```
 
-Or, if installed globally:
+You can also run it directly as:
 
 ```sh
 sengo
 ```
 
-This will start the shell and allow you to connect to a memory or S3-backed repository, run commands, and interact with your data.
+This starts the shell and lets you connect to a memory or S3-backed repository, run commands, and interact with your data.
 
 ---
 

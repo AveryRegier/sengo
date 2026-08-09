@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { SengoClient, SengoCollection, SengoDb, getLogger, setLogLevel } from 'sengo';
 import * as readline from 'node:readline';
 import { parseCommandLine } from './parser.js';

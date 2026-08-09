@@ -5,7 +5,7 @@
   "type": "commonjs",
   "main": "dist/index.js",
   "bin": {
-    "sengo": "dist/sengo.js"
+    "sengo": "dist/index.js"
   },
   "scripts": {
     "start": "node dist/index.js",
