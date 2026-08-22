@@ -6,10 +6,12 @@ import { getLogger } from './logger';
 import logger, { Follower } from 'clox';
 import { sort, Sort } from '../util/sort.js';
 import { evaluateComparison } from './expression.js';
+import { createExplainSink, ExplainResult, ExplainSink, ExplainVerbosity } from './explain';
 
 export type FindOptions = {
   sort?: Sort;
   limit?: number;
+  explain?: ExplainVerbosity;
 };
 
 export class SengoCollection<T> {
@@ -28,37 +30,113 @@ export class SengoCollection<T> {
     return this.store.dropIndex(name);
   }
 
-  async insertOne(doc: Record<string, any>) {
+  async insertOne(doc: Record<string, any>, options?: { explain?: ExplainVerbosity }) {
+    const sink = createExplainSink({
+      opType: 'insertOne',
+      namespace: this.name,
+      verbosity: options?.explain,
+      hasSort: false,
+      hasLimit: false,
+      collectionName: this.name,
+    });
+    const startMs = Date.now();
     const logger = getLogger();
-    // Check for closed store (if supported)
-    if (this.store.isClosed()) {
-      throw new MongoClientClosedError('Store is closed');
+    try {
+      // Check for closed store (if supported)
+      if (this.store.isClosed()) {
+        throw new MongoClientClosedError('Store is closed');
+      }
+      const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
+      logger.debug('Inserting document', { doc: docWithId });
+      await this.store.replaceOne({ _id: docWithId._id }, docWithId);
+      const indexes = await this.store.getIndexes();
+      const indexNames: string[] = [];
+      // Index maintenance: update all indexes
+      for (const [name, index] of indexes) {
+        indexNames.push(name);
+        // Only call updateIndexOnDocumentUpdate, which is the public API
+        logger.debug('Adding doc to index', { name, doc: docWithId });
+        // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
+        await index.addDocument(docWithId);
+      }
+      const result = { acknowledged: true, insertedId: docWithId._id };
+      sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      sink.onOpEnd(true, Date.now() - startMs);
+      return sink.finalize(result) ?? result;
+    } catch (error) {
+      sink.onOpEnd(false, Date.now() - startMs);
+      throw error;
     }
-    const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
-    logger.debug('Inserting document', { doc: docWithId });
-    await this.store.replaceOne({ _id: docWithId._id }, docWithId);
-    // Index maintenance: update all indexes
-    for (const [name, index] of await this.store.getIndexes()) {
-      // Only call updateIndexOnDocumentUpdate, which is the public API
-      logger.debug('Adding doc to index', { name, doc: docWithId });
-      // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
-      await index.addDocument(docWithId);
-    }
-    return { acknowledged: true, insertedId: docWithId._id };
   }
 
-  find(query: Record<string, any>, options?: FindOptions): FindCursor<WithId<T>> {
+  find(query: Record<string, any>, options: FindOptions & { explain: ExplainVerbosity }): Promise<ExplainResult<WithId<T>[]>>;
+  find(query: Record<string, any>, options?: FindOptions): FindCursor<WithId<T>>;
+  find(query: Record<string, any>, options?: FindOptions): any {
+    const sink = createExplainSink({
+      opType: 'find',
+      namespace: this.name,
+      verbosity: options?.explain,
+      hasSort: !!options?.sort,
+      hasLimit: options?.limit !== undefined,
+      collectionName: this.name,
+    });
+
     const logger = getLogger();
     const follower = new Follower(logger);
-    const loader = async () => await follower.follow(
-      () => this._findFilterSort(query, options), 
-      logger => logger.addContexts({cn: "SengoCollection", fn: 'find', collection: this.name }));
-    // Return a FindCursor that will fetch the results lazily
+    const loader = async () => {
+      const loadStartMs = Date.now();
+      const docs = await follower.follow(
+        () => this._findFilterSort(query, options, sink),
+        logger => logger.addContexts({cn: 'SengoCollection', fn: 'find', collection: this.name }),
+      );
+      sink.onTimingPart('documentLoad', Date.now() - loadStartMs, docs.length);
+
+      const indexes = await this.store.getIndexes();
+      const matchingIndex = Array.from(indexes.values()).find(index => index.canSatisfyQuery(query));
+      const stage = matchingIndex ? 'INDEX_LOOKUP' : 'COLLECTION_SCAN';
+
+      sink.onPlanWinner(stage, matchingIndex?.name, !matchingIndex ? 'No usable index for query' : undefined);
+      sink.onDocsLoaded(this.name, docs.length, matchingIndex ? 'indexLookup' : 'scan');
+      sink.onDocsMatched(docs.length);
+      sink.onSortLimit(
+        !!options?.sort,
+        options?.limit !== undefined,
+        !!matchingIndex && options?.limit !== undefined,
+        matchingIndex && options?.limit !== undefined ? 'limit served by index ordering' : undefined,
+      );
+
+      for (const [field, value] of Object.entries(query)) {
+        const operator = typeof value === 'object' && value && !Array.isArray(value) && Object.keys(value).length > 0 ? Object.keys(value)[0] : '$eq';
+        sink.onExprStat(
+          field,
+          operator,
+          true,
+          matchingIndex ? 'index' : 'postLoad',
+          matchingIndex ? 'field matched index key' : 'field filtered after load',
+        );
+      }
+
+      return docs;
+    };
+
+    if (options?.explain) {
+      const startMs = Date.now();
+      return loader()
+        .then((docs): ExplainResult<WithId<T>[]> => {
+          sink.onOpEnd(true, Date.now() - startMs);
+          return sink.finalize(docs) ?? ({ ok: 1, namespace: this.name, command: { type: 'find', query, options }, result: docs } as ExplainResult<WithId<T>[]>);
+        })
+        .catch((error) => {
+          sink.onOpEnd(false, Date.now() - startMs);
+          throw error;
+        });
+    }
+
     return new LoadCursor<WithId<T>>(loader);
   }
 
-  private async _findFilterSort(query: Record<string, any>, options?: FindOptions): Promise<WithId<T>[]> {
-    let promise = this.store.findCandidates(query, options).then(async (results) => {
+  private async _findFilterSort(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink): Promise<WithId<T>[]> {
+    let promise = this.store.findCandidates(query, options, sink).then(async (results) => {
       return results.filter((parsed: Record<string, any>) => {
         if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
           if (Object.entries(query).every(([k, v]) => match(parsed, k, v))) {
@@ -79,77 +157,172 @@ export class SengoCollection<T> {
     return promise;
   }
 
-  findOne(query: Record<string, any>, options?: FindOptions): Promise<WithId<T> | null> {
+  findOne(query: Record<string, any>, options: FindOptions & { explain: ExplainVerbosity }): Promise<ExplainResult<WithId<T> | null>>;
+  findOne(query: Record<string, any>, options?: FindOptions): Promise<WithId<T> | null>;
+  findOne(query: Record<string, any>, options?: FindOptions): any {
+    const sink = createExplainSink({
+      opType: 'findOne',
+      namespace: this.name,
+      verbosity: options?.explain,
+      hasSort: !!options?.sort,
+      hasLimit: options?.limit !== undefined || true,
+      collectionName: this.name,
+    });
     const logger = getLogger();
     const follower = new Follower(logger);
     const loader = async () => {
+      const loadStartMs = Date.now();
       const docs = await follower.follow(
-        () => this._findFilterSort(query, { ...options, limit: 1 }), 
+        () => this._findFilterSort(query, { ...options, limit: 1 }, sink),
         logger => logger.addContexts({cn: "SengoCollection", fn: 'findOne', collection: this.name }));
-      
+      sink.onTimingPart('documentLoad', Date.now() - loadStartMs, docs.length);
+
+      const indexes = await this.store.getIndexes();
+      const matchingIndex = Array.from(indexes.values()).find(index => index.canSatisfyQuery(query));
+      const stage = matchingIndex ? 'INDEX_LOOKUP' : 'COLLECTION_SCAN';
+
+      sink.onPlanWinner(stage, matchingIndex?.name, !matchingIndex ? 'No usable index for query' : undefined);
+      sink.onDocsLoaded(this.name, docs.length, matchingIndex ? 'indexLookup' : 'scan');
+      sink.onDocsMatched(docs.length);
+      sink.onSortLimit(
+        !!options?.sort,
+        true,
+        !!matchingIndex && !!options?.limit,
+        matchingIndex && !!options?.limit ? 'limit served by index ordering' : undefined,
+      );
+
+      for (const [field, value] of Object.entries(query)) {
+        const operator = typeof value === 'object' && value && !Array.isArray(value) && Object.keys(value).length > 0 ? Object.keys(value)[0] : '$eq';
+        sink.onExprStat(
+          field,
+          operator,
+          true,
+          matchingIndex ? 'index' : 'postLoad',
+          matchingIndex ? 'field matched index key' : 'field filtered after load',
+        );
+      }
+
       return docs.length > 0 ? docs[0] : null;
     };
+
+    if (options?.explain) {
+      const startMs = Date.now();
+      return loader()
+        .then((doc): ExplainResult<WithId<T> | null> => {
+          sink.onOpEnd(true, Date.now() - startMs);
+          return sink.finalize(doc) ?? ({ ok: 1, namespace: this.name, command: { type: 'findOne', query, options }, result: doc } as ExplainResult<WithId<T> | null>);
+        })
+        .catch((error) => {
+          sink.onOpEnd(false, Date.now() - startMs);
+          throw error;
+        });
+    }
+
     return loader();
   } 
 
-  async updateOne(filter: Record<string, any>, update: Record<string, any>) {
-    // Find the first matching document
-    const docs = await this.find(filter).toArray();
-    if (!docs.length) {
-      return { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
-    }
-    // Only update the first match (MongoDB semantics)
-    const doc = docs[0];
-    // Create a new object for the updated doc
-    let updatedDoc = { ...doc };
-    // Apply $set only (for now)
-    if (update.$set) {
-      updatedDoc = { ...updatedDoc, ...update.$set };
-    } else {
-      // If no supported update operator, throw MongoDB-like error
-      const err = new MongoServerError('Update document must contain update operators (e.g. $set). Full document replacement is not yet supported.');
-      err.code = 9; // MongoDB's FailedToParse
-      throw err;
-    }
-    // Save the updated doc
-    await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
+  async updateOne(filter: Record<string, any>, update: Record<string, any>, options?: { explain?: ExplainVerbosity }) {
+    const sink = createExplainSink({
+      opType: 'updateOne',
+      namespace: this.name,
+      verbosity: options?.explain,
+      hasSort: false,
+      hasLimit: false,
+      collectionName: this.name,
+    });
+    const startMs = Date.now();
+    try {
+      // Find the first matching document
+      const docs = await this.find(filter).toArray();
+      if (!docs.length) {
+        const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
+        sink.onWriteCost(0, 0, 0, [], 0);
+        sink.onOpEnd(true, Date.now() - startMs);
+        return sink.finalize(result) ?? result;
+      }
+      // Only update the first match (MongoDB semantics)
+      const doc = docs[0];
+      // Create a new object for the updated doc
+      let updatedDoc = { ...doc };
+      // Apply $set only (for now)
+      if (update.$set) {
+        updatedDoc = { ...updatedDoc, ...update.$set };
+      } else {
+        // If no supported update operator, throw MongoDB-like error
+        const err = new MongoServerError('Update document must contain update operators (e.g. $set). Full document replacement is not yet supported.');
+        err.code = 9; // MongoDB's FailedToParse
+        throw err;
+      }
+      // Save the updated doc
+      await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
 
-    const logger = getLogger();
-    // Index maintenance: let each index handle the update logic
-    for (const [name, index] of await this.store.getIndexes()) {
-      logger.debug('Updating doc in index', { name, doc: updatedDoc });
-      await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+      const logger = getLogger();
+      const indexNames: string[] = [];
+      // Index maintenance: let each index handle the update logic
+      for (const [name, index] of await this.store.getIndexes()) {
+        indexNames.push(name);
+        logger.debug('Updating doc in index', { name, doc: updatedDoc });
+        await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+      }
+      const result = { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+      sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      sink.onOpEnd(true, Date.now() - startMs);
+      return sink.finalize(result) ?? result;
+    } catch (error) {
+      sink.onOpEnd(false, Date.now() - startMs);
+      throw error;
     }
-    return { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
   }
 
   /**
    * Delete a single document matching the filter (MongoDB compatible: deleteOne)
    */
-  async deleteOne(filter: Record<string, any>) {
-    // Find the first matching document
-    const found = await this.find(filter).next();
-    if (!found) {
-      return { deletedCount: 0 };
-    }
-    const logger = getLogger();
-    const docId = found._id;
-    // Call the store to delete by _id
-    await this.store.deleteOne(found).then(async () => {
-      // Index maintenance: let each index handle the update logic
-      for (const [name, index] of await this.store.getIndexes()) {
-        logger.debug('Removing doc in index', { name, doc: found });
-        await index.removeDocument(found);
-      }
-    }).catch(err => {
-      if (err.name === 'NoSuchKey') {
-        return { deletedCount: 0 }; // Document not found, no action needed
-      } else {
-        logger.error('Error deleting document', err);
-        throw new MongoServerError('Failed to delete document', { cause: err });
-      }
+  async deleteOne(filter: Record<string, any>, options?: { explain?: ExplainVerbosity }) {
+    const sink = createExplainSink({
+      opType: 'deleteOne',
+      namespace: this.name,
+      verbosity: options?.explain,
+      hasSort: false,
+      hasLimit: false,
+      collectionName: this.name,
     });
-    return { deletedCount: 1 };
+    const startMs = Date.now();
+    try {
+      // Find the first matching document
+      const found = await this.find(filter).next();
+      if (!found) {
+        const result = { deletedCount: 0 };
+        sink.onWriteCost(0, 0, 0, [], 0);
+        sink.onOpEnd(true, Date.now() - startMs);
+        return sink.finalize(result) ?? result;
+      }
+      const logger = getLogger();
+      const docId = found._id;
+      const indexNames: string[] = [];
+      // Call the store to delete by _id
+      await this.store.deleteOne(found).then(async () => {
+        // Index maintenance: let each index handle the update logic
+        for (const [name, index] of await this.store.getIndexes()) {
+          indexNames.push(name);
+          logger.debug('Removing doc in index', { name, doc: found });
+          await index.removeDocument(found);
+        }
+      }).catch(err => {
+        if (err.name === 'NoSuchKey') {
+          return { deletedCount: 0 }; // Document not found, no action needed
+        } else {
+          logger.error('Error deleting document', err);
+          throw new MongoServerError('Failed to delete document', { cause: err });
+        }
+      });
+      const result = { deletedCount: 1 };
+      sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      sink.onOpEnd(true, Date.now() - startMs);
+      return sink.finalize(result) ?? result;
+    } catch (error) {
+      sink.onOpEnd(false, Date.now() - startMs);
+      throw error;
+    }
   }
 
   async createIndex(keys: IndexDefinition | IndexDefinition[]): Promise<string> {

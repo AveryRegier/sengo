@@ -2,7 +2,7 @@ import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from 
 import { Readable } from 'stream';
 import { BaseCollectionIndex, IndexEntry, IndexOptions } from '../collectionIndex';
 import { MongoNetworkError } from './s3CollectionStore';
-import { FindOptions, getLogger } from '../../index';
+import { ExplainSink, FindOptions, getLogger } from '../../index';
 
 
 /**
@@ -62,7 +62,8 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * If not found, returns an empty IndexEntry.
    * @param key Index key
    */
-  protected async fetch(key: string): Promise<IndexEntry> {
+  protected async fetch(key: string, sink?: ExplainSink): Promise<IndexEntry> {
+    const fetchStartedAtMs = Date.now();
 
     try {
       // key is now just the value(s) of the indexed field(s), already encoded by makeIndexKey
@@ -78,9 +79,14 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         };
         getLogger().debug(`Fetching index entry from S3 with If-None-Match`, { command: "head", args });
         const result = await this.s3.send(new HeadObjectCommand(args));
-        if( result?.ETag == cachedEntry.etag) {
+        if (result?.ETag == cachedEntry.etag) {
+          sink?.onCacheEvent('index', this.collectionName, this.name, 'file', 'hit');
+          sink?.onTimingPart('cache', Date.now() - fetchStartedAtMs, 1);
           return cachedEntry; // Return cached entry if available
         }
+        sink?.onCacheEvent('index', this.collectionName, this.name, 'file', 'stale');
+      } else {
+        sink?.onCacheEvent('index', this.collectionName, this.name, 'file', 'miss');
       }
 
       const args = {
@@ -104,9 +110,14 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       }
       const entry = this.createEntry(data, etag);
       this.indexEntryCache.set(key, entry); // Cache the entry for future use
+      sink?.onTimingPart('cache', Date.now() - fetchStartedAtMs, 1);
       return entry;
     } catch (err: any) {
       // Not found, start with empty
+      if (err && (err.name === 'NoSuchKey' || err.Code === 'NoSuchKey')) {
+        sink?.onCacheEvent('index', this.collectionName, this.name, 'file', 'miss');
+      }
+      sink?.onTimingPart('cache', Date.now() - fetchStartedAtMs, 1);
       return this.createEntry();
     }
   }
@@ -246,9 +257,9 @@ export class S3CollectionIndex extends BaseCollectionIndex {
    * Find document IDs for a given index key (loads index entry file at most once per key).
    * @param key Index key
    */
-  async findIdsForKey(key: string, options?: IndexOptions): Promise<string[]> {
+  async findIdsForKey(key: string, options?: IndexOptions, sink?: ExplainSink): Promise<string[]> {
     try {
-      const entry = await this.fetch(key);
+      const entry = await this.fetch(key, sink);
       return entry.toArray(options);
     } catch (err: any) {
       if( err.name === 'NoSuchKey') {

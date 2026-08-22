@@ -4,25 +4,26 @@ import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
 import { MongoClientClosedError } from '../../errors.js';
 import { FindCursor, WithId } from '../../types';
+import { ExplainSink } from '../../client/explain';
 
 export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
   private entries: Map<string, any> = new Map(); // Map from index key to IndexEntry
 
   // Override fetch to return from memory
-  protected async fetch(key: string): Promise<any> {
+  protected async fetch(key: string, sink?: ExplainSink): Promise<any> {
     const entry = this.entries.get(key);
     if (entry) {
+      sink?.onCacheEvent('index', this.name, this.name, 'file', 'hit');
       return entry;
     }
-    // Return new entry if not found
+    sink?.onCacheEvent('index', this.name, this.name, 'file', 'miss');
     const newEntry = this.createEntry();
     this.entries.set(key, newEntry);
     return newEntry;
   }
 
-  async findIdsForKey(key: string, options?: Record<string, any>): Promise<string[]> {
-    let entry = await this.fetch(key);
-    // logger is not available here; consider injecting if needed for debug
+  async findIdsForKey(key: string, options?: Record<string, any>, sink?: ExplainSink): Promise<string[]> {
+    let entry = await this.fetch(key, sink);
     return entry.toArray(options);
   }
 }
@@ -58,11 +59,11 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
    * Uses the index scoring logic from the base class.
    * Prefers indexes that match both query fields and sort fields.
    */
-  private findBestIndex(query: Record<string, any>, options?: any): MemoryCollectionIndex | undefined {
+  private findBestIndex(query: Record<string, any>, options?: any, sink?: ExplainSink): MemoryCollectionIndex | undefined {
     let bestIndex: MemoryCollectionIndex | undefined;
     let bestScore = 0;
     for (const index of this.indexes.values()) {
-      const score = index.scoreForQuery(query, options);
+      const score = index.scoreForQuery(query, options, sink);
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -71,13 +72,13 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     return bestIndex;
   }
 
-  async findCandidates(query: Record<string, any>, options?: any): Promise<WithId<T>[]> {
+  async findCandidates(query: Record<string, any>, options?: any, sink?: ExplainSink): Promise<WithId<T>[]> {
     this.checkClosure();
     
     // Try to use an index if available
-    const index = this.findBestIndex(query, options);
+    const index = this.findBestIndex(query, options, sink);
     if (index) {
-      const indexKeys = index.findKeysForQuery(query);
+      const indexKeys = index.findKeysForQuery(query, sink);
       // If findKeysForQuery returns empty array, index can't be used (missing required fields)
       if (indexKeys.length > 0) {
         // Build index options including filters for the final indexed field if present in query
@@ -95,20 +96,30 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
         const idsSet = new Set<string>();
         
         // Collect all matching IDs from index
+        let entryFilesRead = 0;
+        let candidateIds = 0;
+        const keyLookupStartMs = Date.now();
         for (const key of indexKeys) {
-          const ids = await index.findIdsForKey(key, indexOptions);
+          entryFilesRead += 1;
+          const ids = await index.findIdsForKey(key, indexOptions, sink);
+          candidateIds += ids.length;
           ids.forEach(id => idsSet.add(id));
         }
-        
-        // Return documents with matching IDs
+        sink?.onTimingPart('indexEntryRead', Date.now() - keyLookupStartMs, entryFilesRead);
+
+        sink?.onIndexEntriesRead(index.name, entryFilesRead, candidateIds, idsSet.size);
+        sink?.onPlanWinner('INDEX_LOOKUP', index.name);
         return this.documents.filter(doc => 
           doc._id && idsSet.has(doc._id.toString())
         ) as WithId<T>[];
       }
     }
-    
-    // No index available, return all documents for filtering
-    return Promise.resolve(this.documents.map(a=>a) as WithId<T>[]);
+
+    sink?.onPlanWinner('COLLECTION_SCAN', undefined, 'No usable index for query');
+    const scanStartedAtMs = Date.now();
+    const docs = this.documents.map(a => a) as WithId<T>[];
+    sink?.onTimingPart('scan', Date.now() - scanStartedAtMs, docs.length);
+    return Promise.resolve(docs);
   }
 
   updateOne(filter: Record<string, any>, doc: Record<string, any>) {

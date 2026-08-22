@@ -3,12 +3,16 @@ import { MongoInvalidArgumentError, MongoServerError } from '../errors.js';
 import type { NormalizedIndexKeyRecord } from "./index.js";
 import { SortDirection } from "../util/sort";
 import { ComparisonOperators, getComparisonFn } from '../client/expression.js';
+import type { ExplainSink } from '../client/explain';
 import logger from "../client/logger";
 import { addContext, addContexts, MetaDataValue } from "clox";
 
 export interface CollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
+  canSatisfyQuery(query: Record<string, any>): boolean;
+  scoreForQuery(query: Record<string, any>, options?: any, sink?: ExplainSink): number;
+  findKeysForQuery(query: Record<string, any>, sink?: ExplainSink): string[];
   
   addDocument(doc: Record<string, any>): Promise<void>;
   removeDocument(doc: Record<string, any>): Promise<void>
@@ -322,8 +326,10 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
    * Score is the number of non-final keys (fields that form the storage key).
    * Bonus points if the index's final field matches the sort field.
    */
-  public scoreForQuery(query: Record<string, any>, options?: any): number {
-    if (!this.canSatisfyQuery(query)) {
+  public scoreForQuery(query: Record<string, any>, options?: any, sink?: ExplainSink): number {
+    const canSatisfy = this.canSatisfyQuery(query);
+    if (!canSatisfy) {
+      sink?.onPlanCandidate(this.name, 0, false, 'noUsableIndexKeysFromQuery', 'index cannot satisfy query');
       return 0;
     }
     // Base score is number of non-final keys (more specific = better)
@@ -339,7 +345,8 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
         score += 10; // Large bonus to strongly prefer indexes that support the sort
       }
     }
-    
+
+    sink?.onPlanCandidate(this.name, score, true, undefined, 'index can satisfy query');
     return score;
   }
 
@@ -418,13 +425,13 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     }
   }
 
-  public findKeysForQuery(query: Record<string, any>): string[] {
+  public findKeysForQuery(query: Record<string, any>, sink?: ExplainSink): string[] {
     // For compound indexes, only use non-final fields to build the index key
     // The final field is used for sorting within the index entry
     const keysForIndexPath = this.keys.length > 1 ? this.keys.slice(0, -1) : this.keys;
     
     // Build index keys by combining non-final field values from the query
-    return keysForIndexPath.reduce((acc, key, idx) => {
+    const keys = keysForIndexPath.reduce((acc, key, idx) => {
       const valueToFind = query[key.field];
       if (valueToFind === undefined || valueToFind === null) {
         // If any non-final field is missing, we can't build a complete key
@@ -446,6 +453,9 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
         acc.map((current: string) => `${current}|${v}`)
       );
     }, [] as string[]);
+
+    sink?.onIndexKeys(this.name, keys.length);
+    return keys;
   }
 
   public makeAllIndexEntryKeys(doc: Record<string, any>): string[] {
@@ -503,7 +513,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
 
   // --- Abstract methods (must be implemented by subclass) ---
 
-  abstract findIdsForKey(key: string): Promise<string[]>;
+  abstract findIdsForKey(key: string, options?: IndexOptions, sink?: ExplainSink): Promise<string[]>;
 
   // --- Protected methods ---
   protected async fetch(key: string): Promise<IndexEntry> {

@@ -17,6 +17,7 @@ import { getLogger } from '../../client/logger.js';
 import { get } from 'http';
 import { FindOptions } from '../../index.js';
 import { addContext } from 'clox';
+import type { ExplainSink } from '../../client/explain.js';
 import { sort } from '../../util/sort.js';
 
 export interface S3CollectionStoreOptions {
@@ -159,11 +160,11 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
    * Uses the index scoring logic from the base class.
    * Prefers indexes that match both query fields and sort fields.
    */
-  private findBestIndex(query: Record<string, any>, options?: FindOptions): S3CollectionIndex | undefined {
+  private findBestIndex(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink): S3CollectionIndex | undefined {
     let bestIndex: S3CollectionIndex | undefined;
     let bestScore = 0;
     for (const index of this.loadedIndexes.values()) {
-      const score = index.scoreForQuery(query, options);
+      const score = index.scoreForQuery(query, options, sink);
       if (score > bestScore) {
         bestScore = score;
         bestIndex = index;
@@ -172,7 +173,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     return bestIndex;
   }
 
-  public async findCandidates(query: Record<string, any>, options?: FindOptions): Promise<WithId<T>[]> {
+  public async findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink): Promise<WithId<T>[]> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (query._id) {
       const ids: string[] = [];
@@ -186,26 +187,31 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     
     await this.ensureIndexesLoaded();
     let queryForIndex = combineOrConditions(query);
-    const index = this.findBestIndex(queryForIndex, options);
+    const indexLookupStartedAtMs = Date.now();
+    const index = this.findBestIndex(queryForIndex, options, sink);
     addContext("index", index ? index.name : "none");
     if (index) {
-      const indexKeyValues = index.findKeysForQuery(queryForIndex);
+      const indexKeyValues = index.findKeysForQuery(queryForIndex, sink);
       // If findKeysForQuery returns empty array, index can't be used (missing required fields)
       if (indexKeyValues.length > 0) {
         // Build index options including filters for the final indexed field if present in query
         const indexOptions: any = this.buildIndexOptions(options, index, queryForIndex);
         
         const allIds = await Promise.all(indexKeyValues.map(async key => {
-            let ids = await index.findIdsForKey(key, indexOptions);
+            const ids = await index.findIdsForKey(key, indexOptions, sink);
             return ids;
           })).then(arrays => arrays.flat());
         const set = Array.from(new Set<string>(allIds)); // deduplicate
+        sink?.onTimingPart('indexKeyLookup', Date.now() - indexLookupStartedAtMs, indexKeyValues.length);
+        sink?.onIndexEntriesRead(index.name, indexKeyValues.length, allIds.length, set.length);
+        sink?.onPlanWinner('INDEX_LOOKUP', index.name);
         return this.loadTheseDocuments<T>(set.map(this.id2key.bind(this))).then(docs => {
           return sort<WithId<T>>(indexOptions?.sort || {})(docs);
         });
       }
     }
-    return this.scan();
+    sink?.onPlanWinner('COLLECTION_SCAN', undefined, 'No usable index for query');
+    return this.scan(sink);
   }
 
   private buildIndexOptions(options: FindOptions | undefined, index: S3CollectionIndex, queryForIndex: Record<string, any>) {
@@ -254,8 +260,9 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
    * Scan the S3 bucket for all objects in the collection and filter by query.
    * This is a fallback if no index is available or the query cannot be satisfied by an index.
    */
-  private async scan(): Promise<WithId<T>[]> {
+  private async scan(sink?: ExplainSink): Promise<WithId<T>[]> {
     const prefix = `${this.collection}/data/`;
+    const scanStartedAtMs = Date.now();
     let listed;
     try {
       const args = {
@@ -274,8 +281,9 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     }
 
     const keys = listed.Contents.map(obj => obj.Key!);
-
-    return this.loadTheseDocuments<T>(keys);
+    const docs = await this.loadTheseDocuments<T>(keys);
+    sink?.onTimingPart('scan', Date.now() - scanStartedAtMs, docs.length);
+    return docs;
   }
 
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
