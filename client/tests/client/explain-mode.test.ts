@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SengoClient } from '../../src/client/client';
 import { SengoCollection } from '../../src/client/collection';
+import { createExplainSink } from '../../src/client/explain';
 
 describe('explain mode', () => {
   let client: SengoClient;
@@ -219,5 +220,43 @@ describe('explain mode', () => {
     expect(result.ok).toBe(1);
     expect(result.writeStats.indexEntryFilesUpdated).toEqual(expect.arrayContaining(['status_1', 'priority_1']));
     expect(result.writeStats.indexEntryUpdatesCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it('aggregates cache hit, miss, and stale events for collection and index scopes', () => {
+    const sink = createExplainSink({
+      opType: 'find',
+      namespace: 'tasks',
+      verbosity: 'executionStats',
+      hasSort: false,
+      hasLimit: false,
+      collectionName: 'tasks',
+    });
+
+    sink.onCacheEvent('collection', 'tasks', undefined, 'file', 'miss');
+    sink.onCacheEvent('collection', 'tasks', undefined, 'file', 'hit');
+    sink.onCacheEvent('collection', 'tasks', undefined, 'file', 'stale');
+    sink.onCacheEvent('index', 'tasks', 'status_1', 'file', 'miss');
+    sink.onCacheEvent('index', 'tasks', 'status_1', 'file', 'hit');
+    sink.onCacheEvent('index', 'tasks', 'status_1', 'file', 'stale');
+    sink.onOpEnd(true, 10);
+
+    const result = sink.finalize({ ok: 1 }) as any;
+
+    expect(result.executionStats.cacheStats.collection).toMatchObject({
+      name: 'tasks',
+      fileCacheHits: 1,
+      fileCacheMisses: 1,
+      fileCacheHitRate: 0.5,
+    });
+    expect(result.executionStats.cacheStats.indexes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          indexName: 'status_1',
+          fileCacheHits: 1,
+          fileCacheMisses: 1,
+          fileCacheHitRate: 0.5,
+        }),
+      ]),
+    );
   });
 });
