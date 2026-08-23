@@ -120,6 +120,11 @@ export type ExplainStep =
       indexMetadataWrites: number;
       indexEntryUpdatesCount: number;
       indexEntryFilesUpdated: string[];
+      indexWriteDetails?: Array<{
+        indexName: string;
+        filePath: string;
+        updatedEntries: number;
+      }>;
       flushWaitMs?: number;
     }
   | {
@@ -210,6 +215,11 @@ export type ExplainResult<T = unknown> = {
     indexMetadataWrites: number;
     indexEntryFilesUpdated: string[];
     indexEntryUpdatesCount: number;
+    indexWriteDetails?: Array<{
+      indexName: string;
+      filePath: string;
+      updatedEntries: number;
+    }>;
     flushWaitMs?: number;
   };
   result?: T;
@@ -298,6 +308,11 @@ type ExplainAggregationState = {
     indexMetadataWrites: number;
     indexEntryUpdatesCount: number;
     indexEntryFilesUpdated: Set<string>;
+    indexWriteDetails: Array<{
+      indexName: string;
+      filePath: string;
+      updatedEntries: number;
+    }>;
     flushWaitMs?: number;
   };
 };
@@ -477,11 +492,21 @@ export class CollectingExplainSink implements ExplainSink {
   }
 
   onWriteCost(documentWrites: number, indexMetadataWrites: number, indexEntryUpdatesCount: number, indexEntryFilesUpdated: string[], flushWaitMs?: number): void {
+    const uniqueFiles = Array.from(new Set(indexEntryFilesUpdated)).sort((a, b) => a.localeCompare(b));
+    const perFileCount = uniqueFiles.length > 0
+      ? Math.max(1, Math.ceil(indexEntryUpdatesCount / uniqueFiles.length))
+      : 0;
+
     this.state.write = {
       documentWrites,
       indexMetadataWrites,
       indexEntryUpdatesCount,
-      indexEntryFilesUpdated: new Set<string>(indexEntryFilesUpdated),
+      indexEntryFilesUpdated: new Set<string>(uniqueFiles),
+      indexWriteDetails: uniqueFiles.map(indexName => ({
+        indexName,
+        filePath: `${this.state.namespace}/indices/${indexName}/updated.json`,
+        updatedEntries: perFileCount,
+      })),
       flushWaitMs,
     };
   }
@@ -670,6 +695,7 @@ function serializeExplainResult<T>(state: ExplainAggregationState, result?: T): 
       indexMetadataWrites: state.write.indexMetadataWrites,
       indexEntryUpdatesCount: state.write.indexEntryUpdatesCount,
       indexEntryFilesUpdated: Array.from(state.write.indexEntryFilesUpdated).sort((a, b) => a.localeCompare(b)),
+      indexWriteDetails: state.write.indexWriteDetails,
       flushWaitMs: state.write.flushWaitMs,
     };
   }

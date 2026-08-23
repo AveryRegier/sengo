@@ -270,6 +270,28 @@ describe('explain mode', () => {
     expect(result.writeStats.indexEntryUpdatesCount).toBeGreaterThanOrEqual(2);
   });
 
+  it('records richer per-index write-file detail with exact file paths and mutation counts', async () => {
+    await collection.createIndex({ priority: 1 });
+
+    const result = await collection.updateOne({ status: 'active' }, { $set: { priority: 9 } }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.writeStats.indexWriteDetails).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          indexName: 'status_1',
+          filePath: expect.stringContaining('status_1/'),
+          updatedEntries: expect.any(Number),
+        }),
+        expect.objectContaining({
+          indexName: 'priority_1',
+          filePath: expect.stringContaining('priority_1/'),
+          updatedEntries: expect.any(Number),
+        }),
+      ]),
+    );
+  });
+
   it('aggregates cache hit, miss, and stale events for collection and index scopes', () => {
     const sink = createExplainSink({
       opType: 'find',
