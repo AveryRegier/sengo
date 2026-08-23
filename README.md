@@ -273,6 +273,18 @@ If you run the command without a path, it installs to the current working direct
 - `references/SUPPORTED-COMMANDS-OPERATORS.md`
 - `references/SUPPORTED-INDEX-FEATURES.md`
 - `VERSION.md`
+- bundled subskill folders under `sengo/` (currently includes `explain-optimizer/`)
+
+The installer also validates that bundled subskills were copied and prints their discovered skill names.
+
+### Using the installed skills
+
+- Use `/sengo` for Sengo client CRUD/query code generation, including `countDocuments`.
+- For explain-driven index tuning, ask `/sengo` to use the `sengo-explain-optimizer` workflow.
+- Typical pattern:
+   1. Generate query/index code with `/sengo`.
+   2. Run the query with `explain: 'executionStats'`.
+   3. Feed the explain result back to `/sengo` and request the explain-optimizer flow for index recommendations.
 
 ### Updating skill versions in consumer projects
 
