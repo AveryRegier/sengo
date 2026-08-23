@@ -6,6 +6,7 @@ import { getLogger } from './logger';
 import logger, { Follower } from 'clox';
 import { sort, Sort } from '../util/sort.js';
 import { evaluateComparison } from './expression.js';
+import { getOperator } from './expr/index';
 import { createExplainSink, ExplainResult, ExplainSink, ExplainVerbosity } from './explain';
 
 export type FindOptions = {
@@ -106,13 +107,13 @@ export class SengoCollection<T> {
       );
 
       for (const [field, value] of Object.entries(query)) {
-        const operator = typeof value === 'object' && value && !Array.isArray(value) && Object.keys(value).length > 0 ? Object.keys(value)[0] : '$eq';
+        const expr = describeQueryExpression(field, value, matchingIndex);
         sink.onExprStat(
-          field,
-          operator,
-          true,
-          matchingIndex ? 'index' : 'postLoad',
-          matchingIndex ? 'field matched index key' : 'field filtered after load',
+          expr.field,
+          expr.operator,
+          expr.implemented,
+          expr.appliedAt,
+          expr.note,
         );
       }
 
@@ -192,13 +193,13 @@ export class SengoCollection<T> {
       );
 
       for (const [field, value] of Object.entries(query)) {
-        const operator = typeof value === 'object' && value && !Array.isArray(value) && Object.keys(value).length > 0 ? Object.keys(value)[0] : '$eq';
+        const expr = describeQueryExpression(field, value, matchingIndex);
         sink.onExprStat(
-          field,
-          operator,
-          true,
-          matchingIndex ? 'index' : 'postLoad',
-          matchingIndex ? 'field matched index key' : 'field filtered after load',
+          expr.field,
+          expr.operator,
+          expr.implemented,
+          expr.appliedAt,
+          expr.note,
         );
       }
 
@@ -376,6 +377,37 @@ export class SengoCollection<T> {
 
     return indexes;
   }
+}
+
+function describeQueryExpression(field: string, value: any, matchingIndex?: { name: string }): {
+  field: string;
+  operator: string;
+  implemented: boolean;
+  appliedAt: 'index' | 'postLoad' | 'notApplied';
+  note?: string;
+} {
+  const operator = typeof value === 'object' && value && !Array.isArray(value) && Object.keys(value).length > 0
+    ? Object.keys(value)[0]
+    : '$eq';
+
+  const isSupported = operator === '$eq' || !!getOperator(operator);
+  if (isSupported) {
+    return {
+      field,
+      operator,
+      implemented: true,
+      appliedAt: matchingIndex ? 'index' : 'postLoad',
+      note: matchingIndex ? 'field matched index key' : 'field filtered after load',
+    };
+  }
+
+  return {
+    field,
+    operator,
+    implemented: false,
+    appliedAt: 'notApplied',
+    note: `unsupported operator ${operator} in Sengo`,
+  };
 }
 
 function match(parsed: Record<string, any>, k: string, v: any): unknown {

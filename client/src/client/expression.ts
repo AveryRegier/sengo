@@ -62,7 +62,7 @@ export function evaluateComparison(foundValue: any, queryValue: any, fieldKey?: 
       .filter(([key]) => key.startsWith('$'))
       .every(([op, val]) => {
         const operator = getOperator(op);
-        if (!operator) return true;
+        if (!operator) return false;
         return operator.match(foundValue, val, fieldKey);
       });
   }

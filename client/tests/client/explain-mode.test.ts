@@ -67,6 +67,57 @@ describe('explain mode', () => {
     expect(result.executionStats.timing.parts.some((part: any) => part.part === 'cache' || part.part === 'documentLoad' || part.part === 'indexEntryRead')).toBe(true);
   });
 
+  it('reports the winning plan for indexed queries', async () => {
+    const result = await collection.find({ status: 'active' }, { explain: 'queryPlanner' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.queryPlanner).toBeDefined();
+    expect(result.queryPlanner.winningPlan.stage).toBe('INDEX_LOOKUP');
+    expect(result.queryPlanner.winningPlan.indexName).toBe('status_1');
+  });
+
+  it('records rejected index reason codes in allPlansExecution explain output', async () => {
+    const result = await collection.find({ priority: 7 }, { explain: 'allPlansExecution' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.queryPlanner).toBeDefined();
+    expect(result.queryPlanner.winningPlan.stage).toBe('COLLECTION_SCAN');
+    expect(result.queryPlanner.rejectedPlans).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          indexName: 'status_1',
+          reason: 'noUsableIndexKeysFromQuery',
+          note: 'index cannot satisfy query',
+        }),
+      ]),
+    );
+  });
+
+  it('reports unsupported operators explicitly in expressionStats', async () => {
+    const result = await collection.find({ status: { $regex: '^a' } }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.expressionStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'status',
+          operator: '$regex',
+          implemented: false,
+          appliedAt: 'notApplied',
+        }),
+      ]),
+    );
+  });
+
+  it('reports a collection scan when no usable index exists', async () => {
+    const result = await collection.find({ priority: 7 }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.stage).toBe('COLLECTION_SCAN');
+    expect(result.executionStats.indexName).toBeUndefined();
+    expect(result.executionStats.scanReason).toBe('No usable index for query');
+  });
+
   it('captures explain stats for insertOne', async () => {
     const result = await collection.insertOne({ status: 'queued', priority: 3 }, { explain: 'executionStats' }) as any;
 
