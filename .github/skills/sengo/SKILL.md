@@ -1,6 +1,6 @@
 ---
 name: sengo
-description: 'Create valid Sengo client code for insertOne/find/findOne/updateOne/deleteOne/createIndex/dropIndex/listIndexes. Use when generating MongoDB-like queries and updates that must actually work in Sengo (supported operators, sort, limit, $set).'
+description: 'Create valid Sengo client code for insertOne/find/findOne/countDocuments/updateOne/deleteOne/createIndex/dropIndex/listIndexes. Use when generating MongoDB-like queries and updates that must actually work in Sengo (supported operators, sort, limit, count, $set). For explain-plan diagnosis and index tuning, use the sengo-explain-optimizer subskill.'
 argument-hint: 'What operation do you need (insert, find, update, delete, index), and what schema/fields are involved?'
 ---
 
@@ -17,6 +17,9 @@ Default output profile for this repository:
 - You are converting MongoDB-style intent into Sengo-supported queries.
 - You need CRUD snippets with supported operators/options only.
 - You want index usage with query patterns that match Sengo behavior.
+- You want to generate `countDocuments(...)` usage that aligns with Sengo-supported filtering and options.
+
+Use the [Sengo Explain Optimizer](./explain-optimizer/SKILL.md) when your goal is explain-based optimization diagnosis, scan/root-cause analysis, or index recommendation from actual explain output.
 
 ## Source of Truth
 Use [Supported Commands and Operators](./references/SUPPORTED-COMMANDS-OPERATORS.md) as the canonical support matrix.
@@ -30,6 +33,7 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
 - `collection.insertOne(doc)`
 - `collection.find(query, options?)`
 - `collection.findOne(query, options?)`
+- `collection.countDocuments(filter?, options?)`
 - `collection.updateOne(filter, update)`
 - `collection.deleteOne(filter)`
 - `collection.createIndex(keys)`
@@ -49,6 +53,10 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
 - `findOne(query, options?)`
   - `options.sort`
   - `options.limit` may be passed, but Sengo forces `limit: 1` internally.
+- `countDocuments(filter?, options?)`
+  - `options.skip`
+  - `options.limit`
+  - `options.explain`
 - `updateOne(filter, update)`
   - update document must use supported update operator(s): `$set`
 - `createIndex(keys)`
@@ -83,6 +91,7 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
 4. Add options where useful
 - Add `sort` and/or `limit` only on `find`/`findOne`.
 - For `findOne`, keep in mind effective result count is always 1.
+- For `countDocuments`, use `skip`/`limit` only when the caller wants count windowing.
 
 5. Add index calls when relevant
 - Add `createIndex` for repeated fields used in filtering/sorting.
@@ -127,6 +136,16 @@ const found = await collection.find(
 const newest = await collection.findOne(
   { category: 'work', priority: { $gte: 20 } },
   { sort: { _id: -1 } }
+);
+```
+
+### countDocuments
+```ts
+const activeCount = await collection.countDocuments({ status: 'active' });
+
+const pagedCount = await collection.countDocuments(
+  { status: { $in: ['active', 'pending'] } },
+  { skip: 10, limit: 25 }
 );
 ```
 

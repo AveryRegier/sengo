@@ -1,6 +1,6 @@
 ---
 name: sengo-explain-optimizer
-description: 'Use Sengo explain output to validate whether a query is supported and well optimized, and suggest only safe indexes that match Sengo-supported query shapes.'
+description: 'Use Sengo explain output to validate whether a query (find/findOne/countDocuments) is supported and well optimized, and suggest only safe indexes that match Sengo-supported query shapes. Includes countDocuments index-only optimization guidance.'
 argument-hint: 'Paste a query, explain result, or collection operation and optional sort/limit details. I will decide whether it is supported, whether it is index-optimized, and what index to consider.'
 ---
 
@@ -29,7 +29,7 @@ Use these as the hard boundaries for what is valid in Sengo:
 Check the query shape before trusting the explain result.
 
 Do these checks first:
-- Confirm the command exists in Sengo: `find`, `findOne`, `insertOne`, `updateOne`, `deleteOne`, `createIndex`, etc.
+- Confirm the command exists in Sengo: `find`, `findOne`, `countDocuments`, `insertOne`, `updateOne`, `deleteOne`, `createIndex`, etc.
 - Confirm each operator is in the supported list:
   - allowed query operators: `$or`, `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`
   - direct equality such as `{ status: 'active' }`
@@ -102,6 +102,11 @@ Warning signs:
 - unsupported operators appear in `expressionStats`
 - cache miss rates are high for repeated query shapes
 
+CountDocuments-specific interpretation:
+- For `countDocuments`, `documentsLoaded: 0` in `executionStats` indicates an index-only count path.
+- For `countDocuments`, `documentsLoaded > 0` means count required candidate document loads (for example, filter fields not fully covered by the chosen index).
+- If count queries are common, treat repeated non-zero `documentsLoaded` as a signal to revisit index coverage of count filter fields.
+
 Decision result:
 - `optimized: true` if index lookup was used and the query is reduced by the index
 - `optimized: false` if a scan or post-load sort/limit dominated
@@ -124,6 +129,10 @@ Use these rules:
 2. Use the final field as the sort or range target when the query sorts by it.
 3. Prefer recommendations that reduce S3 document fetches under `find(..., { sort, limit })` patterns.
 4. Do not suggest unsupported operator-dependent indexes, text-search indexes, or Mongo-only features.
+
+CountDocuments index rule of thumb:
+- For frequently used count filters, ensure the filter fields are indexed so count can often be satisfied from index lookup.
+- When possible, keep count filters limited to indexed fields to reduce or avoid S3 document loads.
 
 ### 5) Produce a decision summary
 Return a compact result with these sections:
