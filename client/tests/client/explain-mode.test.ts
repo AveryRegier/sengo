@@ -51,6 +51,22 @@ describe('explain mode', () => {
     expect(result.executionStats.uniqueCandidateIds).toBeGreaterThan(0);
   });
 
+  it('reports exact per-index read costs for the winning index', async () => {
+    const result = await collection.find({ status: 'active' }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.indexReadStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          indexName: 'status_1',
+          entryFilesRead: expect.any(Number),
+          candidateIds: expect.any(Number),
+          uniqueCandidateIds: expect.any(Number),
+        }),
+      ]),
+    );
+  });
+
   it('records cache activity for index file reads', async () => {
     const result = await collection.find({ status: 'active' }, { explain: 'executionStats' }) as any;
 

@@ -157,6 +157,12 @@ export type ExplainResult<T = unknown> = {
     indexEntriesLoaded: number;
     candidateIds: number;
     uniqueCandidateIds: number;
+    indexReadStats: Array<{
+      indexName: string;
+      entryFilesRead: number;
+      candidateIds: number;
+      uniqueCandidateIds: number;
+    }>;
     documentsLoaded: number;
     documentsMatchedAfterLoad: number;
     sortAppliedAfterLoad: boolean;
@@ -240,6 +246,12 @@ type ExplainAggregationState = {
     documentsLoaded: number;
     documentsMatchedAfterLoad: number;
   };
+  indexReadStats: Array<{
+    indexName: string;
+    entryFilesRead: number;
+    candidateIds: number;
+    uniqueCandidateIds: number;
+  }>;
   flags: {
     sortAppliedAfterLoad: boolean;
     limitAppliedAfterLoad: boolean;
@@ -386,10 +398,25 @@ export class CollectingExplainSink implements ExplainSink {
     this.state.counters.indexKeysExamined += keyCount;
   }
 
-  onIndexEntriesRead(_indexName: string, entryFilesRead: number, candidateIds: number, uniqueCandidateIds: number): void {
+  onIndexEntriesRead(indexName: string, entryFilesRead: number, candidateIds: number, uniqueCandidateIds: number): void {
     this.state.counters.indexEntriesLoaded += entryFilesRead;
     this.state.counters.candidateIds += candidateIds;
     this.state.counters.uniqueCandidateIds += uniqueCandidateIds;
+
+    const existing = this.state.indexReadStats.find(stat => stat.indexName === indexName);
+    if (existing) {
+      existing.entryFilesRead += entryFilesRead;
+      existing.candidateIds += candidateIds;
+      existing.uniqueCandidateIds += uniqueCandidateIds;
+      return;
+    }
+
+    this.state.indexReadStats.push({
+      indexName,
+      entryFilesRead,
+      candidateIds,
+      uniqueCandidateIds,
+    });
   }
 
   onDocsLoaded(collection: string, count: number, source: 'idLookup' | 'indexLookup' | 'scan'): void {
@@ -529,6 +556,7 @@ function createInitialState(context: ExplainContext, opId: string): ExplainAggre
       documentsLoaded: 0,
       documentsMatchedAfterLoad: 0,
     },
+    indexReadStats: [],
     flags: {
       sortAppliedAfterLoad: false,
       limitAppliedAfterLoad: false,
@@ -605,6 +633,9 @@ function serializeExplainResult<T>(state: ExplainAggregationState, result?: T): 
       indexEntriesLoaded: state.counters.indexEntriesLoaded,
       candidateIds: state.counters.candidateIds,
       uniqueCandidateIds: state.counters.uniqueCandidateIds,
+      indexReadStats: state.indexReadStats
+        .slice()
+        .sort((a, b) => a.indexName.localeCompare(b.indexName)),
       documentsLoaded: state.counters.documentsLoaded,
       documentsMatchedAfterLoad: state.counters.documentsMatchedAfterLoad,
       sortAppliedAfterLoad: state.flags.sortAppliedAfterLoad,
