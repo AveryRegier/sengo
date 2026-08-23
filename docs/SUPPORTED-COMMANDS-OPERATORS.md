@@ -49,6 +49,20 @@ This section lists options supported by each client command, including commands 
     - signature in [client/src/client/collection.ts](../client/src/client/collection.ts#L82)
     - forced limit=1 merge in [client/src/client/collection.ts](../client/src/client/collection.ts#L87)
   - Test: findOne with sort in [client/tests/client/findOne.test.ts](../client/tests/client/findOne.test.ts#L45)
+- SengoCollection.countDocuments(filter?, options?)
+  - Supported options/args:
+    - filter optional (defaults to empty filter)
+    - options.skip supported
+    - options.limit supported
+    - options.explain supported (`queryPlanner`, `executionStats`, `allPlansExecution`)
+  - Implementation:
+    - CountDocumentsOptions type in [client/src/client/collection.ts](../client/src/client/collection.ts#L18)
+    - method overloads and implementation in [client/src/client/collection.ts](../client/src/client/collection.ts#L233)
+    - explain op typing in [client/src/client/explain.ts](../client/src/client/explain.ts#L3)
+  - Tests:
+    - filter/default count behavior in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L24)
+    - skip/limit options in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L61)
+    - explain mode in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L83)
 - SengoCollection.updateOne(filter, update)
   - Supported options/args:
     - filter required
@@ -175,3 +189,12 @@ Current limitation:
   - Implementation: limit slicing in _findFilterSort in [client/src/client/collection.ts](../client/src/client/collection.ts#L77)
   - Test: find with limit in [client/tests/client/find-with-limit.test.ts](../client/tests/client/find-with-limit.test.ts#L53)
   - Additional test: limit with comparison predicates in [client/tests/client/index-optimization-operators.test.ts](../client/tests/client/index-optimization-operators.test.ts#L56)
+- countDocuments.skip
+  - Implementation: option normalization and skip window in [client/src/client/collection.ts](../client/src/client/collection.ts#L521)
+  - Test: skip behavior in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L61)
+- countDocuments.limit
+  - Implementation: count window limit in [client/src/client/collection.ts](../client/src/client/collection.ts#L528)
+  - Test: combined skip+limit behavior in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L72)
+- explain (find/findOne/countDocuments and write APIs)
+  - Implementation: explain sink and verbosity types in [client/src/client/explain.ts](../client/src/client/explain.ts#L1)
+  - Test: countDocuments explain output in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L83)

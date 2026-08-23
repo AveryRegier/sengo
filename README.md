@@ -74,6 +74,7 @@ What you can do today:
 
 - Insert a single document with `insertOne`
 - Query documents with `find` and `findOne`
+- Count matching documents with `countDocuments`
 - Update a single document with `updateOne` using `$set`
 - Delete a single document with `deleteOne`
 - Create, list, and drop indexes with `createIndex`, `listIndexes`, and `dropIndex`
@@ -89,6 +90,8 @@ Important behavior notes:
 
 - `limit` is supported as a query option, not as a query operator.
 - `findOne` always returns at most one document.
+- `countDocuments` returns an accurate count for a filter and supports `skip`/`limit` options.
+- `countDocuments` supports `explain` and returns explain output when requested.
 - `updateOne` currently supports `$set` style updates.
 
 ### Generic Query Examples
@@ -128,6 +131,21 @@ const recentHighValue = await orders.find(
 
 // Find one
 const oneOrder = await orders.findOne({ customerId: 'cust-123' }, { sort: { createdAt: -1 } });
+
+// Count matching documents
+const processingCount = await orders.countDocuments({ status: 'processing' });
+
+// Count with skip/limit windowing
+const recentWindowCount = await orders.countDocuments(
+   { status: { $in: ['new', 'processing'] } },
+   { skip: 5, limit: 10 }
+);
+
+// Explain countDocuments execution
+const countExplain = await orders.countDocuments(
+   { status: 'processing' },
+   { explain: 'executionStats' }
+);
 
 // Update one with $set
 await orders.updateOne(

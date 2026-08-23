@@ -15,6 +15,12 @@ export type FindOptions = {
   explain?: ExplainVerbosity;
 };
 
+export type CountDocumentsOptions = {
+  skip?: number;
+  limit?: number;
+  explain?: ExplainVerbosity;
+};
+
 export class SengoCollection<T> {
   name: string;
   store: CollectionStore<T>;
@@ -223,6 +229,72 @@ export class SengoCollection<T> {
 
     return loader();
   } 
+
+  countDocuments(filter: Record<string, any>, options: CountDocumentsOptions & { explain: ExplainVerbosity }): Promise<ExplainResult<number>>;
+  countDocuments(filter?: Record<string, any>, options?: CountDocumentsOptions): Promise<number>;
+  countDocuments(filter: Record<string, any> = {}, options?: CountDocumentsOptions): any {
+    const sink = createExplainSink({
+      opType: 'countDocuments',
+      namespace: this.name,
+      verbosity: options?.explain,
+      hasSort: false,
+      hasLimit: options?.limit !== undefined,
+      collectionName: this.name,
+    });
+
+    const logger = getLogger();
+    const follower = new Follower(logger);
+    const loader = async () => {
+      const loadStartMs = Date.now();
+      const docs = await follower.follow(
+        () => this._findFilterSort(filter, undefined, sink),
+        logger => logger.addContexts({ cn: 'SengoCollection', fn: 'countDocuments', collection: this.name }),
+      );
+      sink.onTimingPart('documentLoad', Date.now() - loadStartMs, docs.length);
+
+      const indexes = await this.store.getIndexes();
+      const matchingIndex = Array.from(indexes.values()).find(index => index.canSatisfyQuery(filter));
+      const stage = matchingIndex ? 'INDEX_LOOKUP' : 'COLLECTION_SCAN';
+
+      sink.onPlanWinner(stage, matchingIndex?.name, !matchingIndex ? 'No usable index for query' : undefined);
+      sink.onDocsLoaded(this.name, docs.length, matchingIndex ? 'indexLookup' : 'scan');
+
+      const skip = normalizeCountOption(options?.skip);
+      const limit = normalizeCountOption(options?.limit);
+      const sliced = applyCountWindow(docs, skip, limit);
+      sink.onDocsMatched(sliced.length);
+      sink.onSortLimit(false, options?.skip !== undefined || options?.limit !== undefined, false);
+
+      for (const [field, value] of Object.entries(filter)) {
+        for (const expr of describeQueryExpressions(field, value, matchingIndex)) {
+          sink.onExprStat(
+            expr.field,
+            expr.operator,
+            expr.implemented,
+            expr.appliedAt,
+            expr.note,
+          );
+        }
+      }
+
+      return sliced.length;
+    };
+
+    if (options?.explain) {
+      const startMs = Date.now();
+      return loader()
+        .then((count): ExplainResult<number> => {
+          sink.onOpEnd(true, Date.now() - startMs);
+          return sink.finalize(count) ?? ({ ok: 1, namespace: this.name, command: { type: 'countDocuments', query: filter, options }, result: count } as ExplainResult<number>);
+        })
+        .catch((error) => {
+          sink.onOpEnd(false, Date.now() - startMs);
+          throw error;
+        });
+    }
+
+    return loader();
+  }
 
   async updateOne(filter: Record<string, any>, update: Record<string, any>, options?: { explain?: ExplainVerbosity }) {
     const sink = createExplainSink({
@@ -444,6 +516,22 @@ function describeQueryExpressions(field: string, value: any, matchingIndex?: { n
     appliedAt: fieldIsIndexed ? 'index' : 'postLoad',
     note: fieldIsIndexed ? 'field matched index key' : 'field filtered after load',
   }];
+}
+
+function normalizeCountOption(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
+function applyCountWindow<T>(docs: T[], skip?: number, limit?: number): T[] {
+  const start = skip ?? 0;
+  const afterSkip = start > 0 ? docs.slice(start) : docs;
+  if (limit !== undefined) {
+    return afterSkip.slice(0, limit);
+  }
+  return afterSkip;
 }
 
 function match(parsed: Record<string, any>, k: string, v: any): unknown {
