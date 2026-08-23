@@ -109,6 +109,51 @@ describe('explain mode', () => {
     );
   });
 
+  it('marks expression placement as index when the predicate is served by an index', async () => {
+    const result = await collection.find({ status: 'active' }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.expressionStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'status',
+          operator: '$eq',
+          implemented: true,
+          appliedAt: 'index',
+        }),
+      ]),
+    );
+  });
+
+  it('marks expression placement as postLoad when no matching index exists', async () => {
+    const result = await collection.find({ priority: 7 }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.expressionStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'priority',
+          operator: '$eq',
+          implemented: true,
+          appliedAt: 'postLoad',
+        }),
+      ]),
+    );
+  });
+
+  it('reports sort/limit optimization effect when the index can satisfy ordering', async () => {
+    const result = await collection.find({ status: 'active' }, { sort: { status: 1 }, limit: 1, explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.stage).toBe('INDEX_LOOKUP');
+    expect(result.executionStats.sortAppliedAfterLoad).toBe(true);
+    expect(result.executionStats.limitAppliedAfterLoad).toBe(true);
+    expect(result.executionStats.indexSortLimitOptimization.used).toBe(true);
+    expect(result.executionStats.indexSortLimitOptimization.reason).toBe('limit served by index ordering');
+    expect(result.executionStats.documentsLoaded).toBeGreaterThan(0);
+    expect(result.executionStats.documentsLoaded).toBeLessThanOrEqual(2);
+  });
+
   it('reports a collection scan when no usable index exists', async () => {
     const result = await collection.find({ priority: 7 }, { explain: 'executionStats' }) as any;
 
