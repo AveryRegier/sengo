@@ -63,6 +63,29 @@ Accepted order values in index definitions include `1`, `-1`, and `text` by type
   - operator + sort + limit optimization: [client/tests/client/index-optimization-operators.test.ts](../client/tests/client/index-optimization-operators.test.ts#L55)
   - index-entry-level limit/sort cases: [client/tests/repository/indexEntry-optimization.test.ts](../client/tests/repository/indexEntry-optimization.test.ts#L5)
 
+## Index-Only countDocuments Optimization
+
+Use this to make count queries fast and low-cost on S3:
+
+- Add indexes for fields you use in `countDocuments` filters.
+- Keep count filters focused on indexed fields when possible.
+- Prefer equality and `$in` filters on indexed fields for best count performance.
+- If your count filter includes non-indexed fields, Sengo may need to load candidate documents to finish filtering.
+
+Recommended patterns:
+
+- Single-field count filters:
+  - create index: `createIndex({ status: 1 })`
+  - count query: `countDocuments({ status: 'active' })`
+- Compound count filters:
+  - put exact-match filter fields first in the index
+  - include additional filtered field(s) in the same compound index when counts commonly use them together
+
+How to verify optimization:
+
+- Run `countDocuments(filter, { explain: 'executionStats' })`.
+- If explain shows `documentsLoaded: 0`, the count was satisfied from index lookup without document loads.
+
 ## Index-Related Operator Support in Indexed Retrieval
 
 - `$in` support in index key expansion for non-final fields
