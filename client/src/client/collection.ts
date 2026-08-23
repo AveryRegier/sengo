@@ -381,13 +381,15 @@ export class SengoCollection<T> {
   }
 }
 
-function describeQueryExpressions(field: string, value: any, matchingIndex?: { name: string }): Array<{
+function describeQueryExpressions(field: string, value: any, matchingIndex?: { name: string; keys?: Array<{ field: string }> }): Array<{
   field: string;
   operator: string;
   implemented: boolean;
   appliedAt: 'index' | 'postLoad' | 'notApplied';
   note?: string;
 }> {
+  const fieldIsIndexed = matchingIndex?.keys?.some(indexField => indexField.field === field) ?? false;
+
   if (field === '$or') {
     return [{
       field: '$or',
@@ -403,8 +405,8 @@ function describeQueryExpressions(field: string, value: any, matchingIndex?: { n
       field,
       operator: '$eq',
       implemented: true,
-      appliedAt: matchingIndex ? 'index' : 'postLoad',
-      note: matchingIndex ? 'field matched index key' : 'field filtered after load',
+      appliedAt: fieldIsIndexed ? 'index' : 'postLoad',
+      note: fieldIsIndexed ? 'field matched index key' : 'field filtered after load',
     }];
   }
 
@@ -416,8 +418,8 @@ function describeQueryExpressions(field: string, value: any, matchingIndex?: { n
         field,
         operator: '$eq',
         implemented: true,
-        appliedAt: matchingIndex ? 'index' : 'postLoad',
-        note: matchingIndex ? 'field matched index key' : 'field filtered after load',
+        appliedAt: fieldIsIndexed ? 'index' : 'postLoad',
+        note: fieldIsIndexed ? 'field matched index key' : 'field filtered after load',
       }];
     }
 
@@ -427,9 +429,9 @@ function describeQueryExpressions(field: string, value: any, matchingIndex?: { n
         field,
         operator,
         implemented: isSupported,
-        appliedAt: isSupported ? (matchingIndex ? 'index' : 'postLoad') : 'notApplied',
+        appliedAt: isSupported ? (fieldIsIndexed ? 'index' : 'postLoad') : 'notApplied',
         note: isSupported
-          ? (matchingIndex ? 'field matched index key' : 'field filtered after load')
+          ? (fieldIsIndexed ? 'field matched index key' : 'field filtered after load')
           : `unsupported operator ${operator} in Sengo${operatorValue !== undefined ? `: ${JSON.stringify(operatorValue)}` : ''}`,
       };
     });
@@ -439,8 +441,8 @@ function describeQueryExpressions(field: string, value: any, matchingIndex?: { n
     field,
     operator: '$eq',
     implemented: true,
-    appliedAt: matchingIndex ? 'index' : 'postLoad',
-    note: matchingIndex ? 'field matched index key' : 'field filtered after load',
+    appliedAt: fieldIsIndexed ? 'index' : 'postLoad',
+    note: fieldIsIndexed ? 'field matched index key' : 'field filtered after load',
   }];
 }
 

@@ -169,6 +169,38 @@ describe('explain mode', () => {
     );
   });
 
+  it('attributes each expression to the exact index or post-load path, not just the presence of any matching index', async () => {
+    const result = await collection.find({
+      status: { $in: ['active'] },
+      priority: { $gt: 1 },
+      notes: { $regex: '^a' },
+    }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.expressionStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'status',
+          operator: '$in',
+          implemented: true,
+          appliedAt: 'index',
+        }),
+        expect.objectContaining({
+          field: 'priority',
+          operator: '$gt',
+          implemented: true,
+          appliedAt: 'postLoad',
+        }),
+        expect.objectContaining({
+          field: 'notes',
+          operator: '$regex',
+          implemented: false,
+          appliedAt: 'notApplied',
+        }),
+      ]),
+    );
+  });
+
   it('marks expression placement as postLoad when no matching index exists', async () => {
     const result = await collection.find({ priority: 7 }, { explain: 'executionStats' }) as any;
 
