@@ -4,6 +4,35 @@ This analysis is intentionally scoped to client API support (not shell command U
 
 ## Client API Commands
 
+### Explain mode surface
+
+Sengo supports the `explain` option on read and write operations to expose a rough MongoDB-style plan and cost report.
+
+Supported verbosity values:
+
+- `queryPlanner`
+- `executionStats`
+- `allPlansExecution`
+
+Use cases:
+
+- Validate whether a query is supported by Sengo's current operator surface.
+- Check whether the query is using a usable index or falling back to a scan.
+- Measure whether `sort` and `limit` are satisfied in index order.
+- Inspect whether expressions are applied at the index or after loading documents.
+- Estimate write cost, including which index entry files were updated.
+
+Supported operations with explain:
+
+- `find(query, { explain: '...' })`
+- `findOne(query, { explain: '...' })`
+- `countDocuments(filter?, { explain: '...' })`
+- `insertOne(doc, { explain: '...' })`
+- `updateOne(filter, update, { explain: '...' })`
+- `deleteOne(filter, { explain: '...' })`
+
+The explain result is shaped as a MongoDB-like object with `queryPlanner`, `executionStats`, and `writeStats` sections when applicable.
+
 ### Command Options Matrix
 
 This section lists options supported by each client command, including commands with no options.
@@ -107,6 +136,35 @@ Important:
   - find option handling: [client/src/client/collection.ts](../client/src/client/collection.ts#L76)
   - findOne forced single-result behavior: [client/src/client/collection.ts](../client/src/client/collection.ts#L87)
   - tests: [client/tests/client/find-with-limit.test.ts](../client/tests/client/find-with-limit.test.ts#L53), [client/tests/client/index-optimization-operators.test.ts](../client/tests/client/index-optimization-operators.test.ts#L56)
+
+### Explain-guided index advice
+
+A query is a good candidate for a new index when explain shows:
+
+- `COLLECTION_SCAN` with no usable index
+- `scanReason` set to a fallback reason
+- `sortAppliedAfterLoad: true` for a query that includes a sort
+- `limitAppliedAfterLoad: true` for a query that includes a limit
+- unsupported operators or post-load filtering noted in `executionStats.expressionStats`
+
+Use the supported compound-index guidance from [docs/SUPPORTED-INDEX-FEATURES.md](SUPPORTED-INDEX-FEATURES.md):
+
+- put equality/prefix filter fields first
+- use the final field for the sort or range portion of the query
+- prefer patterns that reduce document fetches under `find(..., { sort, limit })`
+- keep suggestions inside supported Sengo query features
+
+### Explain schema summary
+
+The explain result exposes a practical, Mongo-like summary for AI-based query optimization:
+
+- `queryPlanner.winningPlan` for selected plan and candidate rejections
+- `executionStats.stage`, `indexName`, `documentsLoaded`, and `scanReason`
+- `executionStats.expressionStats` for index-vs-post-load placement
+- `executionStats.indexSortLimitOptimization` for optimization detection
+- `writeStats.indexEntryFilesUpdated` and `writeStats.indexWriteDetails` for writes
+
+These fields are the contract the AI skill should use when deciding whether a query is valid and whether an index would materially help.
 
 ### Expression evaluation path
 

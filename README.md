@@ -159,6 +159,46 @@ await orders.deleteOne({ customerId: 'cust-123', status: 'shipped' });
 await client.close();
 ```
 
+## Explain mode
+
+Sengo supports explain output on read and write calls to help you understand plan selection, index usage, scan fallback, unsupported predicates, and write cost.
+
+### Explain modes
+
+Use the `explain` option on supported operations with one of these values:
+
+- `queryPlanner`: shows the chosen winning plan and rejected candidates
+- `executionStats`: shows the winning plan plus read/write cost, timings, cache stats, and expression placement
+- `allPlansExecution`: includes the winner and rejected plan details in the same output shape
+
+### Example
+
+```ts
+const result = await orders.find(
+  { status: 'active', priority: { $gte: 10 } },
+  {
+    sort: { priority: -1 },
+    limit: 25,
+    explain: 'executionStats'
+  }
+);
+
+console.log(result.queryPlanner?.winningPlan);
+console.log(result.executionStats?.stage);
+console.log(result.executionStats?.indexSortLimitOptimization);
+console.log(result.executionStats?.expressionStats);
+```
+
+### What explain helps you answer
+
+- Did the query use an index or fall back to a collection scan?
+- Was a sort or limit applied after document load instead of in index order?
+- Did a query expression run in index space or only after load?
+- Was a MongoDB-like operator unsupported in Sengo?
+- How many index files were touched during a write?
+
+When explain shows a scan or post-load sort/limit, it is a strong indicator that a new index may help. See the index guidance below for safe recommendations.
+
 ## How Indexes Work (And Why They Matter)
 
 In S3-backed systems, the expensive part of a query is usually loading full document files. Indexes help reduce those reads.
