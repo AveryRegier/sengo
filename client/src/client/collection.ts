@@ -1,5 +1,5 @@
 import { MongoClientClosedError, MongoServerError } from '../errors.js';
-import { normalizeIndexKeys, type CollectionStore } from '../repository/index';
+import { CandidateLoadDocuments, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
@@ -143,16 +143,18 @@ export class SengoCollection<T> {
     return new LoadCursor<WithId<T>>(loader);
   }
 
-  private async _findFilterSort(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink): Promise<WithId<T>[]> {
-    let promise = this.store.findCandidates(query, options, sink).then(async (results) => {
-      return results.filter((parsed: Record<string, any>) => {
-        if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
-          if (Object.entries(query).every(([k, v]) => match(parsed, k, v))) {
-            return true;
-          }
-        }
-        return false;
-      });
+  private async _findFilterSort(
+    query: Record<string, any>,
+    options?: FindOptions,
+    sink?: ExplainSink,
+    loadDocuments?: CandidateLoadDocuments<T>,
+    candidatesAlreadyFiltered: boolean = false,
+  ): Promise<WithId<T>[]> {
+    let promise = this.store.findCandidates(query, options, sink, loadDocuments).then(async (results) => {
+      if (candidatesAlreadyFiltered) {
+        return results;
+      }
+      return filterMatchingDocuments(results, query);
     });
     if(options?.sort) {
       promise = promise.then(docs => {
@@ -246,24 +248,47 @@ export class SengoCollection<T> {
     const follower = new Follower(logger);
     const loader = async () => {
       const loadStartMs = Date.now();
+      let usedIndexOnly = false;
+      let loadedDocsCount = 0;
+
       const docs = await follower.follow(
-        () => this._findFilterSort(filter, undefined, sink),
+        () => this._findFilterSort(
+          filter,
+          undefined,
+          sink,
+          async request => {
+            if (request.mode === 'indexLookup' && request.canUseKeysAsResult) {
+              usedIndexOnly = true;
+              return request.keys.map(key => ({ _id: key } as WithId<T>));
+            }
+
+            const loaded = await request.loadDefault();
+            loadedDocsCount += loaded.length;
+            return filterMatchingDocuments(loaded, filter);
+          },
+          true,
+        ),
         logger => logger.addContexts({ cn: 'SengoCollection', fn: 'countDocuments', collection: this.name }),
       );
-      sink.onTimingPart('documentLoad', Date.now() - loadStartMs, docs.length);
+      sink.onTimingPart('documentLoad', Date.now() - loadStartMs, loadedDocsCount);
 
       const indexes = await this.store.getIndexes();
       const matchingIndex = Array.from(indexes.values()).find(index => index.canSatisfyQuery(filter));
       const stage = matchingIndex ? 'INDEX_LOOKUP' : 'COLLECTION_SCAN';
 
       sink.onPlanWinner(stage, matchingIndex?.name, !matchingIndex ? 'No usable index for query' : undefined);
-      sink.onDocsLoaded(this.name, docs.length, matchingIndex ? 'indexLookup' : 'scan');
+      sink.onDocsLoaded(this.name, usedIndexOnly ? 0 : loadedDocsCount, matchingIndex ? 'indexLookup' : 'scan');
 
       const skip = normalizeCountOption(options?.skip);
       const limit = normalizeCountOption(options?.limit);
       const sliced = applyCountWindow(docs, skip, limit);
       sink.onDocsMatched(sliced.length);
-      sink.onSortLimit(false, options?.skip !== undefined || options?.limit !== undefined, false);
+      sink.onSortLimit(
+        false,
+        options?.skip !== undefined || options?.limit !== undefined,
+        usedIndexOnly,
+        usedIndexOnly ? 'count satisfied by index lookup only' : undefined,
+      );
 
       for (const [field, value] of Object.entries(filter)) {
         for (const expr of describeQueryExpressions(field, value, matchingIndex)) {
@@ -532,6 +557,15 @@ function applyCountWindow<T>(docs: T[], skip?: number, limit?: number): T[] {
     return afterSkip.slice(0, limit);
   }
   return afterSkip;
+}
+
+function filterMatchingDocuments<T>(docs: WithId<T>[], query: Record<string, any>): WithId<T>[] {
+  return docs.filter((parsed: Record<string, any>) => {
+    if (parsed && typeof parsed === 'object' && (parsed)._id !== undefined) {
+      return Object.entries(query).every(([k, v]) => match(parsed, k, v));
+    }
+    return false;
+  });
 }
 
 function match(parsed: Record<string, any>, k: string, v: any): unknown {

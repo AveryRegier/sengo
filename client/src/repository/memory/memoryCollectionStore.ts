@@ -1,4 +1,4 @@
-import type { CollectionStore } from '../index';
+import type { CandidateLoadDocuments, CollectionStore } from '../index';
 import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
@@ -72,8 +72,9 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     return bestIndex;
   }
 
-  async findCandidates(query: Record<string, any>, options?: any, sink?: ExplainSink): Promise<WithId<T>[]> {
+  async findCandidates(query: Record<string, any>, options?: any, sink?: ExplainSink, _loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]> {
     this.checkClosure();
+    const loadDocuments = _loadDocuments;
     
     // Try to use an index if available
     const index = this.findBestIndex(query, options, sink);
@@ -109,15 +110,37 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
 
         sink?.onIndexEntriesRead(index.name, entryFilesRead, candidateIds, idsSet.size);
         sink?.onPlanWinner('INDEX_LOOKUP', index.name);
-        return this.documents.filter(doc => 
+        const keys = Array.from(idsSet);
+        const loadDefault = async () => this.documents.filter(doc => 
           doc._id && idsSet.has(doc._id.toString())
         ) as WithId<T>[];
+
+        if (loadDocuments) {
+          return loadDocuments({
+            keys,
+            mode: 'indexLookup',
+            canUseKeysAsResult: false,
+            indexName: index.name,
+            loadDefault,
+          });
+        }
+
+        return loadDefault();
       }
     }
 
     sink?.onPlanWinner('COLLECTION_SCAN', undefined, 'No usable index for query');
     const scanStartedAtMs = Date.now();
-    const docs = this.documents.map(a => a) as WithId<T>[];
+    const scanDocs = this.documents.map(a => a) as WithId<T>[];
+    const scanKeys = scanDocs.map(doc => `${doc._id}`);
+    const docs = loadDocuments
+      ? await loadDocuments({
+        keys: scanKeys,
+        mode: 'scan',
+        canUseKeysAsResult: false,
+        loadDefault: async () => scanDocs,
+      })
+      : scanDocs;
     sink?.onTimingPart('scan', Date.now() - scanStartedAtMs, docs.length);
     return Promise.resolve(docs);
   }

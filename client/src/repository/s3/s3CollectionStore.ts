@@ -2,7 +2,7 @@ import { MongoClientClosedError, MongoInvalidArgumentError, MongoServerError } f
 // (stray dropIndex removed, now only in class body)
 import type { CollectionIndex } from '../collectionIndex';
 import { S3CollectionIndex } from './s3CollectionIndex';
-import type { CollectionStore } from '../';
+import type { CandidateLoadDocuments, CollectionStore } from '../';
 import {
   S3Client,
   PutObjectCommand,
@@ -19,6 +19,7 @@ import { FindOptions } from '../../index.js';
 import { addContext } from 'clox';
 import type { ExplainSink } from '../../client/explain.js';
 import { sort } from '../../util/sort.js';
+import { getOperator } from '../../client/expr/index.js';
 
 export interface S3CollectionStoreOptions {
   region?: string;
@@ -173,7 +174,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     return bestIndex;
   }
 
-  public async findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink): Promise<WithId<T>[]> {
+  public async findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink, loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     if (query._id) {
       const ids: string[] = [];
@@ -182,7 +183,8 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       } else {
         ids.push(query._id);
       }
-      return await this.loadTheseDocuments<T>(ids.map(this.id2key.bind(this)));
+      const keys = ids.map(this.id2key.bind(this));
+      return this.materializeCandidates(keys, 'idLookup', loadDocuments, false);
     }
     
     await this.ensureIndexesLoaded();
@@ -205,13 +207,68 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
         sink?.onTimingPart('indexKeyLookup', Date.now() - indexLookupStartedAtMs, indexKeyValues.length);
         sink?.onIndexEntriesRead(index.name, indexKeyValues.length, allIds.length, set.length);
         sink?.onPlanWinner('INDEX_LOOKUP', index.name);
-        return this.loadTheseDocuments<T>(set.map(this.id2key.bind(this))).then(docs => {
+        return this.materializeCandidates(
+          set.map(this.id2key.bind(this)),
+          'indexLookup',
+          loadDocuments,
+          this.canUseKeysAsResult(index, queryForIndex),
+          index.name,
+        ).then(docs => {
           return sort<WithId<T>>(indexOptions?.sort || {})(docs);
         });
       }
     }
     sink?.onPlanWinner('COLLECTION_SCAN', undefined, 'No usable index for query');
-    return this.scan(sink);
+    return this.scan(sink, loadDocuments);
+  }
+
+  private async materializeCandidates(
+    keys: string[],
+    mode: 'idLookup' | 'indexLookup' | 'scan',
+    loadDocuments: CandidateLoadDocuments<T> | undefined,
+    canUseKeysAsResult: boolean,
+    indexName?: string,
+  ): Promise<WithId<T>[]> {
+    const loadDefault = () => this.loadTheseDocuments<T>(keys);
+    if (!loadDocuments) {
+      return loadDefault();
+    }
+    return loadDocuments({
+      keys,
+      mode,
+      canUseKeysAsResult,
+      indexName,
+      loadDefault,
+    });
+  }
+
+  private canUseKeysAsResult(index: S3CollectionIndex, query: Record<string, any>): boolean {
+    if (query.$or !== undefined) {
+      return false;
+    }
+
+    const supportedFields = new Set(index.keys.map(key => key.field));
+    for (const field of Object.keys(query)) {
+      if (!supportedFields.has(field)) {
+        return false;
+      }
+    }
+
+    const nonFinalKeys = index.keys.length > 1 ? index.keys.slice(0, -1) : index.keys;
+    for (const key of nonFinalKeys) {
+      if (!supportsLookupValue(query[key.field])) {
+        return false;
+      }
+    }
+
+    if (index.keys.length > 1) {
+      const finalField = index.keys[index.keys.length - 1].field;
+      if (query[finalField] !== undefined && !supportsIndexedComparison(query[finalField])) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   private buildIndexOptions(options: FindOptions | undefined, index: S3CollectionIndex, queryForIndex: Record<string, any>) {
@@ -260,7 +317,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
    * Scan the S3 bucket for all objects in the collection and filter by query.
    * This is a fallback if no index is available or the query cannot be satisfied by an index.
    */
-  private async scan(sink?: ExplainSink): Promise<WithId<T>[]> {
+  private async scan(sink?: ExplainSink, loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]> {
     const prefix = `${this.collection}/data/`;
     const scanStartedAtMs = Date.now();
     let listed;
@@ -281,7 +338,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     }
 
     const keys = listed.Contents.map(obj => obj.Key!);
-    const docs = await this.loadTheseDocuments<T>(keys);
+    const docs = await this.materializeCandidates(keys, 'scan', loadDocuments, false);
     sink?.onTimingPart('scan', Date.now() - scanStartedAtMs, docs.length);
     return docs;
   }
@@ -418,4 +475,41 @@ async function getBodyAsString(result: GetObjectCommandOutput): Promise<string> 
     stream.on('error', reject);
   });
   return data;
+}
+
+function supportsLookupValue(value: any): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    if (Array.isArray(value.$in)) {
+      return true;
+    }
+    return value.$eq !== undefined;
+  }
+  return true;
+}
+
+function supportsIndexedComparison(value: any): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return false;
+  }
+  if (typeof value !== 'object') {
+    return true;
+  }
+
+  const operators = Object.entries(value).filter(([key]) => key.startsWith('$'));
+  if (operators.length === 0) {
+    return true;
+  }
+
+  return operators.every(([operator]) => {
+    if (operator === '$or') {
+      return false;
+    }
+    return !!getOperator(operator);
+  });
 }

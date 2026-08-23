@@ -14,13 +14,25 @@ export * from './collectionIndex';
 
 export type NormalizedIndexKeyRecord = { field: string, order: Order };
 
+export type CandidateLoadMode = 'idLookup' | 'indexLookup' | 'scan';
+
+export type CandidateLoadRequest<T> = {
+  keys: string[];
+  mode: CandidateLoadMode;
+  canUseKeysAsResult: boolean;
+  indexName?: string;
+  loadDefault: () => Promise<WithId<T>[]>;
+};
+
+export type CandidateLoadDocuments<T> = (request: CandidateLoadRequest<T>) => Promise<WithId<T>[]>;
+
 export interface CollectionStore<T> {
   getIndexes(): Promise<Map<string, CollectionIndex>>;
   close(): Promise<void>;
   createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex>;
   deleteOne(id: any): Promise<void>;
   dropIndex(name: string): Promise<void>;
-  findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink): Promise<WithId<T>[]>
+  findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink, loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]>
   isClosed(): boolean;
   replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void>;
 }
