@@ -109,6 +109,33 @@ describe('explain mode', () => {
     );
   });
 
+  it('reports unsupported operators alongside implemented predicates in the same query', async () => {
+    await collection.createIndex({ priority: 1 });
+
+    const result = await collection.find({
+      status: { $regex: '^a' },
+      priority: { $gt: 1 },
+    }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.expressionStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'status',
+          operator: '$regex',
+          implemented: false,
+          appliedAt: 'notApplied',
+        }),
+        expect.objectContaining({
+          field: 'priority',
+          operator: '$gt',
+          implemented: true,
+          appliedAt: expect.stringMatching(/^(index|postLoad)$/),
+        }),
+      ]),
+    );
+  });
+
   it('marks expression placement as index when the predicate is served by an index', async () => {
     const result = await collection.find({ status: 'active' }, { explain: 'executionStats' }) as any;
 
@@ -171,5 +198,26 @@ describe('explain mode', () => {
     expect(result.writeStats).toBeDefined();
     expect(result.result).toMatchObject({ acknowledged: true });
     expect(result.writeStats.documentWrites).toBeGreaterThanOrEqual(1);
+  });
+
+  it('records write cost per updated index file', async () => {
+    await collection.createIndex({ priority: 1 });
+
+    const result = await collection.insertOne({ status: 'queued', priority: 3 }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.writeStats.documentWrites).toBe(1);
+    expect(result.writeStats.indexEntryUpdatesCount).toBe(2);
+    expect(result.writeStats.indexEntryFilesUpdated).toEqual(expect.arrayContaining(['status_1', 'priority_1']));
+  });
+
+  it('tracks exact per-index file updates across multiple indexes', async () => {
+    await collection.createIndex({ priority: 1 });
+
+    const result = await collection.updateOne({ status: 'active' }, { $set: { priority: 9 } }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.writeStats.indexEntryFilesUpdated).toEqual(expect.arrayContaining(['status_1', 'priority_1']));
+    expect(result.writeStats.indexEntryUpdatesCount).toBeGreaterThanOrEqual(2);
   });
 });
