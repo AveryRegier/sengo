@@ -275,4 +275,67 @@ describe('explain mode', () => {
       ]),
     );
   });
+
+  it('uses a no-op sink when explain is not requested and ignores invalid timing', () => {
+    const sink = createExplainSink({
+      opType: 'find',
+      namespace: 'tasks',
+      collectionName: 'tasks',
+      hasSort: false,
+      hasLimit: false,
+    });
+
+    sink.onTimingPart('cache', -7);
+    sink.onPlanWinner('COLLECTION_SCAN', undefined, 'No usable index for query');
+    sink.onExprStat('status', '$regex', false, 'notApplied', 'unsupported operator $regex in Sengo');
+
+    expect(sink.finalize({ ok: 1 })).toBeUndefined();
+  });
+
+  it('treats top-level $or and object-equality predicates as explainable post-load predicates', async () => {
+    const result = await collection.find({
+      $or: [{ status: 'active' }, { priority: 1 }],
+      meta: { nested: 1 },
+    }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.expressionStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: '$or',
+          operator: '$or',
+          implemented: true,
+          appliedAt: 'postLoad',
+        }),
+        expect.objectContaining({
+          field: 'meta',
+          operator: '$eq',
+          implemented: true,
+          appliedAt: 'postLoad',
+        }),
+      ]),
+    );
+  });
+
+  it('reports null and undefined filter values as equality predicates', async () => {
+    const result = await collection.find({ status: null, priority: undefined }, { explain: 'executionStats' }) as any;
+
+    expect(result.ok).toBe(1);
+    expect(result.executionStats.expressionStats).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'status',
+          operator: '$eq',
+          implemented: true,
+          appliedAt: 'postLoad',
+        }),
+        expect.objectContaining({
+          field: 'priority',
+          operator: '$eq',
+          implemented: true,
+          appliedAt: 'postLoad',
+        }),
+      ]),
+    );
+  });
 });

@@ -107,14 +107,15 @@ export class SengoCollection<T> {
       );
 
       for (const [field, value] of Object.entries(query)) {
-        const expr = describeQueryExpression(field, value, matchingIndex);
-        sink.onExprStat(
-          expr.field,
-          expr.operator,
-          expr.implemented,
-          expr.appliedAt,
-          expr.note,
-        );
+        for (const expr of describeQueryExpressions(field, value, matchingIndex)) {
+          sink.onExprStat(
+            expr.field,
+            expr.operator,
+            expr.implemented,
+            expr.appliedAt,
+            expr.note,
+          );
+        }
       }
 
       return docs;
@@ -193,14 +194,15 @@ export class SengoCollection<T> {
       );
 
       for (const [field, value] of Object.entries(query)) {
-        const expr = describeQueryExpression(field, value, matchingIndex);
-        sink.onExprStat(
-          expr.field,
-          expr.operator,
-          expr.implemented,
-          expr.appliedAt,
-          expr.note,
-        );
+        for (const expr of describeQueryExpressions(field, value, matchingIndex)) {
+          sink.onExprStat(
+            expr.field,
+            expr.operator,
+            expr.implemented,
+            expr.appliedAt,
+            expr.note,
+          );
+        }
       }
 
       return docs.length > 0 ? docs[0] : null;
@@ -379,35 +381,67 @@ export class SengoCollection<T> {
   }
 }
 
-function describeQueryExpression(field: string, value: any, matchingIndex?: { name: string }): {
+function describeQueryExpressions(field: string, value: any, matchingIndex?: { name: string }): Array<{
   field: string;
   operator: string;
   implemented: boolean;
   appliedAt: 'index' | 'postLoad' | 'notApplied';
   note?: string;
-} {
-  const operator = typeof value === 'object' && value && !Array.isArray(value) && Object.keys(value).length > 0
-    ? Object.keys(value)[0]
-    : '$eq';
+}> {
+  if (field === '$or') {
+    return [{
+      field: '$or',
+      operator: '$or',
+      implemented: true,
+      appliedAt: 'postLoad',
+      note: 'top-level $or evaluated after load',
+    }];
+  }
 
-  const isSupported = operator === '$eq' || !!getOperator(operator);
-  if (isSupported) {
-    return {
+  if (value === undefined || value === null) {
+    return [{
       field,
-      operator,
+      operator: '$eq',
       implemented: true,
       appliedAt: matchingIndex ? 'index' : 'postLoad',
       note: matchingIndex ? 'field matched index key' : 'field filtered after load',
-    };
+    }];
   }
 
-  return {
+  if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length > 0) {
+    const operatorEntries = Object.entries(value).filter(([op]) => op.startsWith('$'));
+
+    if (operatorEntries.length === 0) {
+      return [{
+        field,
+        operator: '$eq',
+        implemented: true,
+        appliedAt: matchingIndex ? 'index' : 'postLoad',
+        note: matchingIndex ? 'field matched index key' : 'field filtered after load',
+      }];
+    }
+
+    return operatorEntries.map(([operator, operatorValue]) => {
+      const isSupported = operator === '$eq' || !!getOperator(operator) || operator === '$or';
+      return {
+        field,
+        operator,
+        implemented: isSupported,
+        appliedAt: isSupported ? (matchingIndex ? 'index' : 'postLoad') : 'notApplied',
+        note: isSupported
+          ? (matchingIndex ? 'field matched index key' : 'field filtered after load')
+          : `unsupported operator ${operator} in Sengo${operatorValue !== undefined ? `: ${JSON.stringify(operatorValue)}` : ''}`,
+      };
+    });
+  }
+
+  return [{
     field,
-    operator,
-    implemented: false,
-    appliedAt: 'notApplied',
-    note: `unsupported operator ${operator} in Sengo`,
-  };
+    operator: '$eq',
+    implemented: true,
+    appliedAt: matchingIndex ? 'index' : 'postLoad',
+    note: matchingIndex ? 'field matched index key' : 'field filtered after load',
+  }];
 }
 
 function match(parsed: Record<string, any>, k: string, v: any): unknown {
