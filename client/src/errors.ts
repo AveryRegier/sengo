@@ -108,4 +108,28 @@ export class MongoParseError extends MongoClientError {
   }
 }
 
+/**
+ * Error thrown when a unique key constraint is violated (e.g., duplicate _id or unique index).
+ * MongoDB code: 11000 (E11000 duplicate key error collection)
+ */
+export class DuplicateKeyError extends MongoServerError {
+  code: number = 11000;
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
+    this.name = 'DuplicateKeyError';
+  }
+}
+
+/**
+ * Error thrown when an S3 conditional write (IfMatch/IfNoneMatch) fails after max retries.
+ * Indicates that concurrent modifications prevent the operation from succeeding.
+ * S3 status: 412 (Precondition Failed)
+ */
+export class PreconditionFailedError extends MongoServerError {
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
+    this.name = 'PreconditionFailedError';
+  }
+}
+
 // Add more error types as needed, based only on the public API documentation.

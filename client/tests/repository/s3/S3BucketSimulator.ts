@@ -51,6 +51,28 @@ export class S3BucketSimulator {
     console.warn('extractKey: Could not extract key from', cmd);
     return undefined;
   }
+
+  static extractIfMatch(cmd: any): string | undefined {
+    if (!cmd) return undefined;
+    let input = cmd.input;
+    if (!input && typeof cmd === 'object') {
+      input = Object.getOwnPropertyDescriptor(cmd, 'input')?.value;
+    }
+    if (input && input.IfMatch) return input.IfMatch;
+    if (cmd.IfMatch) return cmd.IfMatch;
+    return undefined;
+  }
+
+  static extractIfNoneMatch(cmd: any): string | undefined {
+    if (!cmd) return undefined;
+    let input = cmd.input;
+    if (!input && typeof cmd === 'object') {
+      input = Object.getOwnPropertyDescriptor(cmd, 'input')?.value;
+    }
+    if (input && input.IfNoneMatch) return input.IfNoneMatch;
+    if (cmd.IfNoneMatch) return cmd.IfNoneMatch;
+    return undefined;
+  }
   static extractBody(cmd: any): string | undefined {
     if (!cmd) return undefined;
     if (typeof cmd === 'string') return undefined;
@@ -110,14 +132,42 @@ export class S3BucketSimulator {
   putObject(keyOrCmd: string | any, body?: string) {
     const key = typeof keyOrCmd === 'string' ? keyOrCmd : S3BucketSimulator.extractKey(keyOrCmd);
     const b = body !== undefined ? body : S3BucketSimulator.extractBody(keyOrCmd);
+    const ifMatch = S3BucketSimulator.extractIfMatch(keyOrCmd);
+    const ifNoneMatch = S3BucketSimulator.extractIfNoneMatch(keyOrCmd);
+    
     if (!key) throw new Error('putObject: missing key');
     if (b === undefined) throw new Error('putObject: missing body');
+
+    // Handle IfNoneMatch: '*' (fail if key exists)
+    if (ifNoneMatch === '*' && key in this.files) {
+      const err: any = new Error('PreconditionFailed');
+      err.name = 'PreconditionFailed';
+      err.$metadata = { httpStatusCode: 412 };
+      throw err;
+    }
+
+    // Handle IfMatch: <ETag> (fail if ETag mismatch or key doesn't exist)
+    if (ifMatch !== undefined) {
+      if (!(key in this.files)) {
+        const err: any = new Error('PreconditionFailed');
+        err.name = 'PreconditionFailed';
+        err.$metadata = { httpStatusCode: 412 };
+        throw err;
+      }
+      if (this.etags[key] !== ifMatch) {
+        const err: any = new Error('PreconditionFailed');
+        err.name = 'PreconditionFailed';
+        err.$metadata = { httpStatusCode: 412 };
+        throw err;
+      }
+    }
+
     this.files[key] = b;
     this.etags[key] = chance.guid(); // Generate a new ETag for the file
     // Log all index/document file writes
     if (key.includes('/indices/')) {
       this.indexAccessLog.push({ key, command: 'putObject' });
-    } else if (key.includes('/documents/')) {
+    } else if (key.includes('/data/')) {
       this.documentAccessLog.push({ key, command: 'putObject' });
     }
     // For backward compatibility
@@ -169,7 +219,7 @@ export class S3BucketSimulator {
     // Log all index/document file deletes
     if (key.includes('/indices/')) {
       this.indexAccessLog.push({ key, command: 'deleteObject' });
-    } else if (key.includes('/documents/')) {
+    } else if (key.includes('/data/')) {
       this.documentAccessLog.push({ key, command: 'deleteObject' });
     }
     // For backward compatibility

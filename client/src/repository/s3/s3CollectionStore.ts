@@ -1,4 +1,4 @@
-import { MongoClientClosedError, MongoInvalidArgumentError, MongoServerError } from '../../errors.js'; // Import MongoDB error classes
+import { MongoClientClosedError, MongoInvalidArgumentError, MongoServerError, MongoNetworkError, DuplicateKeyError, PreconditionFailedError } from '../../errors.js'; // Import MongoDB error classes
 // (stray dropIndex removed, now only in class body)
 import type { CollectionIndex } from '../collectionIndex';
 import { S3CollectionIndex } from './s3CollectionIndex';
@@ -112,19 +112,28 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     }
   }
 
-  async replaceOne(filter: Record<string, any>, doc: Record<string, any>) {
+  async replaceOne(filter: Record<string, any>, doc: Record<string, any>, options?: { ifMatch?: string; ifNoneMatch?: string }) {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     this.ensureIndexesLoaded();
     const _id = filter._id ?? doc._id;
     if (!_id) throw new MongoInvalidArgumentError('replaceOne requires _id');
     const key = this.id2key(_id);
     const body = JSON.stringify(doc);
-    const args = {
+    const args: any = {
       Bucket: this.bucket,
       Key: key,
       Body: body,
       ContentType: 'application/json',
     };
+    
+    // Add conditional write headers if provided
+    if (options?.ifMatch) {
+      args.IfMatch = options.ifMatch;
+    }
+    if (options?.ifNoneMatch) {
+      args.IfNoneMatch = options.ifNoneMatch;
+    }
+    
     getLogger().debug(`Replacing document in S3`, { command: "putObject", args });
     await this.s3.send(new PutObjectCommand(args));
     // No MongoDB-style response here; just return void
@@ -314,6 +323,35 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   }
 
   /**
+   * Fetch a document by ID and return it with its ETag for conditional writes.
+   */
+  async loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null> {
+    try {
+      const key = this.id2key(id);
+      const args = {
+        Bucket: this.bucket,
+        Key: key,
+      };
+      getLogger().debug(`Fetching document with ETag from S3`, { command: "getObject", args });
+      const result = await this.s3.send(new GetObjectCommand(args));
+      if (!result || !result.Body) return null;
+      const data = await getBodyAsString(result);
+      const doc = JSON.parse(data);
+      const etag = result.ETag || '';
+      return { doc, etag };
+    } catch (err: any) {
+      if (err.name === 'NoSuchKey') return null;
+      if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
+        throw new MongoNetworkError(err.message || 'Network error');
+      }
+      if (typeof err === 'string') {
+        throw new MongoNetworkError(err);
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Scan the S3 bucket for all objects in the collection and filter by query.
    * This is a fallback if no index is available or the query cannot be satisfied by an index.
    */
@@ -433,14 +471,6 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   async close() {
     this.closed = true;
-  }
-}
-
-// Simulate a MongoDB network error
-export class MongoNetworkError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'MongoNetworkError';
   }
 }
 

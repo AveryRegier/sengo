@@ -154,7 +154,7 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     return { matchedCount: 1, modifiedCount: 1 };
   }
 
-  async replaceOne(filter: Record<string, any>, doc: Record<string, any>) {
+  async replaceOne(filter: Record<string, any>, doc: Record<string, any>, options?: { ifMatch?: string; ifNoneMatch?: string }) {
     const idx = this.documents.findIndex(d => d._id === (filter._id ?? doc._id));
     if (idx !== -1) {
       this.documents[idx] = { ...doc } as WithId<T> & { [key: string]: any };

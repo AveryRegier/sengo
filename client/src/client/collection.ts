@@ -1,4 +1,4 @@
-import { MongoClientClosedError, MongoServerError } from '../errors.js';
+import { MongoClientClosedError, MongoServerError, DuplicateKeyError, PreconditionFailedError } from '../errors.js';
 import { CandidateLoadDocuments, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { FindCursor, IndexDefinition, WithId } from '../types';
@@ -55,7 +55,18 @@ export class SengoCollection<T> {
       }
       const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
       logger.debug('Inserting document', { doc: docWithId });
-      await this.store.replaceOne({ _id: docWithId._id }, docWithId);
+      
+      // Use IfNoneMatch: '*' to ensure the document doesn't already exist
+      try {
+        await this.store.replaceOne({ _id: docWithId._id }, docWithId, { ifNoneMatch: '*' });
+      } catch (err: any) {
+        // Handle S3 412 (PreconditionFailed) as DuplicateKeyError
+        if (err.$metadata?.httpStatusCode === 412 || err.name === 'PreconditionFailed') {
+          throw new DuplicateKeyError(`E11000 duplicate key error collection: ${this.name} index: _id_ dup key: { _id: ${docWithId._id} }`);
+        }
+        throw err;
+      }
+      
       const indexes = await this.store.getIndexes();
       const indexNames: string[] = [];
       // Index maintenance: update all indexes
@@ -331,43 +342,99 @@ export class SengoCollection<T> {
       collectionName: this.name,
     });
     const startMs = Date.now();
+    const logger = getLogger();
+    const MAX_RETRIES = 3;
+    
     try {
-      // Find the first matching document
-      const docs = await this.find(filter).toArray();
-      if (!docs.length) {
-        const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
-        sink.onWriteCost(0, 0, 0, [], 0);
-        sink.onOpEnd(true, Date.now() - startMs);
-        return sink.finalize(result) ?? result;
-      }
-      // Only update the first match (MongoDB semantics)
-      const doc = docs[0];
-      // Create a new object for the updated doc
-      let updatedDoc = { ...doc };
-      // Apply $set only (for now)
-      if (update.$set) {
-        updatedDoc = { ...updatedDoc, ...update.$set };
-      } else {
-        // If no supported update operator, throw MongoDB-like error
-        const err = new MongoServerError('Update document must contain update operators (e.g. $set). Full document replacement is not yet supported.');
+      // Validate update contains supported operators
+      if (!update.$set && !update.$setOnInsert) {
+        const err = new MongoServerError('Update document must contain update operators (e.g. $set, $setOnInsert). Full document replacement is not yet supported.');
         err.code = 9; // MongoDB's FailedToParse
         throw err;
       }
-      // Save the updated doc
-      await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc);
 
-      const logger = getLogger();
-      const indexNames: string[] = [];
-      // Index maintenance: let each index handle the update logic
-      for (const [name, index] of await this.store.getIndexes()) {
-        indexNames.push(name);
-        logger.debug('Updating doc in index', { name, doc: updatedDoc });
-        await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+      // Helper function to apply update operators to a document
+      const applyUpdate = (doc: Record<string, any>) => {
+        let updatedDoc = { ...doc };
+        if (update.$set) {
+          updatedDoc = { ...updatedDoc, ...update.$set };
+        }
+        return updatedDoc;
+      };
+
+      // Retry loop for optimistic locking
+      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+          // Find the first matching document
+          const docs = await this.find(filter).toArray();
+          if (!docs.length) {
+            const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
+            sink.onWriteCost(0, 0, 0, [], 0);
+            sink.onOpEnd(true, Date.now() - startMs);
+            return sink.finalize(result) ?? result;
+          }
+
+          // Only update the first match (MongoDB semantics)
+          const doc = docs[0];
+          const updatedDoc = applyUpdate(doc);
+
+          // Fetch with ETag for conditional write
+          const recordWithETag = await (this.store as any).loadRecordWithETag(doc._id);
+          if (!recordWithETag) {
+            // Document was deleted between find and update attempt, treat as no match
+            const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
+            sink.onWriteCost(0, 0, 0, [], 0);
+            sink.onOpEnd(true, Date.now() - startMs);
+            return sink.finalize(result) ?? result;
+          }
+
+          const { etag } = recordWithETag;
+
+          // Try to update with ETag-based conditional write
+          try {
+            logger.debug('Updating document with ETag condition', { _id: doc._id, etag, attempt });
+            await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc, { ifMatch: etag });
+          } catch (err: any) {
+            // Handle 412 Precondition Failed - ETag mismatch, trigger retry
+            if (err.$metadata?.httpStatusCode === 412 || err.name === 'PreconditionFailed') {
+              logger.debug('ETag mismatch on attempt', { _id: doc._id, attempt });
+              if (attempt < MAX_RETRIES - 1) {
+                // Retry: reload and reapply
+                continue;
+              } else {
+                // Max retries exhausted
+                throw new PreconditionFailedError(`Failed to update document after ${MAX_RETRIES} attempts due to conflicting updates. Please try again.`);
+              }
+            }
+            throw err;
+          }
+
+          // Update successful
+          const indexNames: string[] = [];
+          for (const [name, index] of await this.store.getIndexes()) {
+            indexNames.push(name);
+            logger.debug('Updating doc in index', { name, doc: updatedDoc });
+            await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+          }
+          const result = { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+          sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+          sink.onOpEnd(true, Date.now() - startMs);
+          return sink.finalize(result) ?? result;
+        } catch (err: any) {
+          // If it's a PreconditionFailedError from max retries, rethrow immediately
+          if (err instanceof PreconditionFailedError) {
+            throw err;
+          }
+          // For other errors, if it's not a 412, rethrow immediately
+          if (err.$metadata?.httpStatusCode !== 412 && err.name !== 'PreconditionFailedError') {
+            throw err;
+          }
+          // Otherwise, loop will retry
+        }
       }
-      const result = { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
-      sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
-      sink.onOpEnd(true, Date.now() - startMs);
-      return sink.finalize(result) ?? result;
+
+      // Should not reach here, but just in case
+      throw new PreconditionFailedError(`Failed to update document after ${MAX_RETRIES} attempts`);
     } catch (error) {
       sink.onOpEnd(false, Date.now() - startMs);
       throw error;

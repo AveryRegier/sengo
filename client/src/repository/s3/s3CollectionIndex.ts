@@ -1,7 +1,7 @@
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 import { BaseCollectionIndex, IndexEntry, IndexOptions } from '../collectionIndex';
-import { MongoNetworkError } from './s3CollectionStore';
+import { MongoNetworkError } from '../../errors.js';
 import { ExplainSink, FindOptions, getLogger } from '../../index';
 
 
