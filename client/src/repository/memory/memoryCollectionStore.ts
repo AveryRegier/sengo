@@ -175,6 +175,23 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     const [removed] = this.documents.splice(idx, 1);
   }
 
+  /**
+   * Loads a document by _id with an ETag for conditional writes.
+   * For memory backend, we generate a stable ETag from the document content hash.
+   * @param id Document _id
+   * @returns { doc, etag } or null if not found
+   */
+  async loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null> {
+    this.checkClosure();
+    const doc = this.documents.find(d => d._id?.toString() === id?.toString());
+    if (!doc) {
+      return null;
+    }
+    // For memory store, generate a stable ETag based on JSON hash
+    const etag = Buffer.from(JSON.stringify(doc)).toString('base64').substring(0, 32);
+    return { doc: { ...doc }, etag };
+  }
+
   async close() {
     this.closed = true;
   }

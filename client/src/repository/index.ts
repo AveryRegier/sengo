@@ -34,6 +34,7 @@ export interface CollectionStore<T> {
   dropIndex(name: string): Promise<void>;
   findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink, loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]>
   isClosed(): boolean;
+  loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null>;
   replaceOne(filter: Record<string, any>, doc: Record<string, any>, options?: { ifMatch?: string; ifNoneMatch?: string }): Promise<void>;
 }
 
