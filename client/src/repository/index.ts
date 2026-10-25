@@ -36,6 +36,7 @@ export interface CollectionStore<T> {
   isClosed(): boolean;
   loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null>;
   replaceOne(filter: Record<string, any>, doc: Record<string, any>, options?: { ifMatch?: string; ifNoneMatch?: string }): Promise<void>;
+  replaceOneWithRetry(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void>;
 }
 
 

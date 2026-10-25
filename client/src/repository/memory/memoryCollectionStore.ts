@@ -2,7 +2,7 @@ import type { CandidateLoadDocuments, CollectionStore } from '../index';
 import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
-import { MongoClientClosedError } from '../../errors.js';
+import { MongoClientClosedError, MongoServerError } from '../../errors.js';
 import { FindCursor, WithId } from '../../types';
 import { ExplainSink } from '../../client/explain';
 
@@ -218,6 +218,54 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
    */
   getIndex(name: string): MemoryCollectionIndex | undefined {
     return this.indexes.get(name);
+  }
+
+  async replaceOneWithRetry(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void> {
+    const MAX_RETRIES = 3;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const recordWithETag = await this.loadRecordWithETag(id);
+      if (!recordWithETag) {
+        throw new MongoServerError(`Document with _id ${id} not found`);
+      }
+
+      const { doc, etag } = recordWithETag;
+
+      // Validate filter if provided
+      if (validateFilter && !validateFilter(doc)) {
+        throw new MongoServerError(`Document with _id ${id} does not match filter after reload`);
+      }
+
+      const updatedDoc = applyUpdate(doc);
+
+      // For memory store, check if ETag is still valid (document hasn't changed)
+      const currentDoc = this.documents.find(d => d._id?.toString() === id?.toString());
+      const currentETag = currentDoc 
+        ? Buffer.from(JSON.stringify(currentDoc)).toString('base64').substring(0, 32)
+        : null;
+
+      if (currentETag !== etag) {
+        // ETag mismatch - document was modified between load and update
+        if (attempt < MAX_RETRIES - 1) {
+          continue; // Retry: reload and reapply
+        } else {
+          throw new MongoServerError(
+            `Failed to update document after ${MAX_RETRIES} attempts due to conflicting updates. Please try again.`
+          );
+        }
+      }
+
+      // Update the document
+      const idx = this.documents.findIndex(d => d._id?.toString() === id?.toString());
+      if (idx !== -1) {
+        this.documents[idx] = { ...updatedDoc } as WithId<T> & { [key: string]: any };
+        return; // Success
+      } else {
+        throw new MongoServerError(`Document with _id ${id} not found`);
+      }
+    }
+
+    throw new MongoServerError(`Failed to update document after ${MAX_RETRIES} attempts`);
   }
 
   async dropIndex(name: string): Promise<void> {

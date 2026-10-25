@@ -469,6 +469,47 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     return this.loadedIndexes.get(name);
   }
 
+  async replaceOneWithRetry(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void> {
+    const MAX_RETRIES = 3;
+    const logger = getLogger();
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const recordWithETag = await this.loadRecordWithETag(id);
+      if (!recordWithETag) {
+        throw new MongoServerError(`Document with _id ${id} not found`);
+      }
+
+      const { doc, etag } = recordWithETag;
+
+      // Validate filter if provided
+      if (validateFilter && !validateFilter(doc)) {
+        throw new MongoServerError(`Document with _id ${id} does not match filter after reload`);
+      }
+
+      const updatedDoc = applyUpdate(doc);
+
+      try {
+        logger.debug('Updating document with ETag condition', { _id: id, etag, attempt });
+        await this.replaceOne({ _id: updatedDoc._id }, updatedDoc, { ifMatch: etag });
+        return; // Success
+      } catch (err: any) {
+        if (err.$metadata?.httpStatusCode === 412 || err.name === 'PreconditionFailedError') {
+          logger.debug('ETag mismatch on attempt', { _id: id, attempt });
+          if (attempt < MAX_RETRIES - 1) {
+            continue; // Retry: reload and reapply
+          } else {
+            throw new PreconditionFailedError(
+              `Failed to update document after ${MAX_RETRIES} attempts due to conflicting updates. Please try again.`
+            );
+          }
+        }
+        throw err;
+      }
+    }
+
+    throw new PreconditionFailedError(`Failed to update document after ${MAX_RETRIES} attempts`);
+  }
+
   async close() {
     this.closed = true;
   }

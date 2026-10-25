@@ -31,6 +31,28 @@ export class SengoCollection<T> {
   }
 
   /**
+   * Check if a document matches a filter query.
+   * Used for validating filters in retry loops.
+   */
+  private docMatchesFilter(doc: Record<string, any>, filter: Record<string, any>): boolean {
+    // Handle $or operator
+    if (filter.$or && Array.isArray(filter.$or)) {
+      return filter.$or.some(condition => this.docMatchesFilter(doc, condition));
+    }
+
+    // Check all filter fields
+    for (const [key, value] of Object.entries(filter)) {
+      if (key === '$or') continue; // Already handled above
+      
+      const docValue = doc[key];
+      if (!evaluateComparison(docValue, value, key)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /**
    * Drop an index by name (MongoDB compatible: dropIndex)
    */
   async dropIndex(name: string): Promise<void> {
@@ -343,7 +365,6 @@ export class SengoCollection<T> {
     });
     const startMs = Date.now();
     const logger = getLogger();
-    const MAX_RETRIES = 3;
     
     try {
       // Validate update contains supported operators
@@ -353,88 +374,59 @@ export class SengoCollection<T> {
         throw err;
       }
 
-      // Helper function to apply update operators to a document
-      const applyUpdate = (doc: Record<string, any>) => {
-        let updatedDoc = { ...doc };
+      // Find the first matching document
+      const docs = await this.find(filter).toArray();
+      if (!docs.length) {
+        const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
+        sink.onWriteCost(0, 0, 0, [], 0);
+        sink.onOpEnd(true, Date.now() - startMs);
+        return sink.finalize(result) ?? result;
+      }
+
+      // Only update the first match (MongoDB semantics)
+      const doc = docs[0];
+
+      // Create a filter validator for the retry loop
+      const validateFilter = (current: WithId<Record<string, any>>) => {
+        return this.docMatchesFilter(current, filter);
+      };
+
+      // Define the update function to be applied
+      const applyUpdate = (current: WithId<Record<string, any>>) => {
+        let updatedDoc = { ...current };
         if (update.$set) {
           updatedDoc = { ...updatedDoc, ...update.$set };
         }
         return updatedDoc;
       };
 
-      // Retry loop for optimistic locking
-      for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-          // Find the first matching document
-          const docs = await this.find(filter).toArray();
-          if (!docs.length) {
-            const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
-            sink.onWriteCost(0, 0, 0, [], 0);
-            sink.onOpEnd(true, Date.now() - startMs);
-            return sink.finalize(result) ?? result;
-          }
-
-          // Only update the first match (MongoDB semantics)
-          const doc = docs[0];
-          const updatedDoc = applyUpdate(doc);
-
-          // Fetch with ETag for conditional write
-          const recordWithETag = await (this.store as any).loadRecordWithETag(doc._id);
-          if (!recordWithETag) {
-            // Document was deleted between find and update attempt, treat as no match
-            const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
-            sink.onWriteCost(0, 0, 0, [], 0);
-            sink.onOpEnd(true, Date.now() - startMs);
-            return sink.finalize(result) ?? result;
-          }
-
-          const { etag } = recordWithETag;
-
-          // Try to update with ETag-based conditional write
-          try {
-            logger.debug('Updating document with ETag condition', { _id: doc._id, etag, attempt });
-            await this.store.replaceOne({ _id: updatedDoc._id }, updatedDoc, { ifMatch: etag });
-          } catch (err: any) {
-            // Handle 412 Precondition Failed - ETag mismatch, trigger retry
-            if (err.$metadata?.httpStatusCode === 412 || err.name === 'PreconditionFailed') {
-              logger.debug('ETag mismatch on attempt', { _id: doc._id, attempt });
-              if (attempt < MAX_RETRIES - 1) {
-                // Retry: reload and reapply
-                continue;
-              } else {
-                // Max retries exhausted
-                throw new PreconditionFailedError(`Failed to update document after ${MAX_RETRIES} attempts due to conflicting updates. Please try again.`);
-              }
-            }
-            throw err;
-          }
-
-          // Update successful
-          const indexNames: string[] = [];
-          for (const [name, index] of await this.store.getIndexes()) {
-            indexNames.push(name);
-            logger.debug('Updating doc in index', { name, doc: updatedDoc });
-            await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
-          }
-          const result = { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
-          sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      // Delegate retry logic to the store with filter validation (cast to match generic T)
+      try {
+        await this.store.replaceOneWithRetry(doc._id, applyUpdate as any, validateFilter as any);
+      } catch (err: any) {
+        // If filter stops matching after reload, treat as no match (matchedCount 0)
+        if (err.message && err.message.includes('does not match filter after reload')) {
+          const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
+          sink.onWriteCost(0, 0, 0, [], 0);
           sink.onOpEnd(true, Date.now() - startMs);
           return sink.finalize(result) ?? result;
-        } catch (err: any) {
-          // If it's a PreconditionFailedError from max retries, rethrow immediately
-          if (err instanceof PreconditionFailedError) {
-            throw err;
-          }
-          // For other errors, if it's not a 412, rethrow immediately
-          if (err.$metadata?.httpStatusCode !== 412 && err.name !== 'PreconditionFailedError') {
-            throw err;
-          }
-          // Otherwise, loop will retry
         }
+        throw err;
       }
 
-      // Should not reach here, but just in case
-      throw new PreconditionFailedError(`Failed to update document after ${MAX_RETRIES} attempts`);
+      // Update indexes
+      const indexNames: string[] = [];
+      const updatedDoc = applyUpdate(doc);
+      for (const [name, index] of await this.store.getIndexes()) {
+        indexNames.push(name);
+        logger.debug('Updating doc in index', { name, doc: updatedDoc });
+        await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+      }
+
+      const result = { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
+      sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      sink.onOpEnd(true, Date.now() - startMs);
+      return sink.finalize(result) ?? result;
     } catch (error) {
       sink.onOpEnd(false, Date.now() - startMs);
       throw error;
