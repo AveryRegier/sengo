@@ -8,11 +8,19 @@ This project is a TypeScript Node.js library called 'sengo'. It is an open sourc
 - Ensure all code is original and does not copy MongoDB source.
 - Prioritize clean, readable, and well-documented TypeScript code.
 
+## Git Workflow - CRITICAL
+- ❌ **DO NOT PUSH** to git - let user decide when to push
+- ❌ **DO NOT COMMIT** without explicit user request or completion verification
+- ✅ Show git status at end of work
+- ✅ Provide context for next session
+- ✅ Always run full test suite (`npm test`) before considering work complete
+
 ## Testing
 - Test framework: **Vitest** (NOT Jest - use describe/it/expect from 'vitest')
 - S3 testing: Use `S3BucketSimulator` from `tests/repository/s3/S3BucketSimulator.ts` to mock S3 operations
 - Each test creates its own S3BucketSimulator instance - no shared state between tests
 - Tests can inspect S3 operations via `s3sim.getLogs()` to verify minimal document fetches
+- **Before and After**: Run `npm test` before and after implementing to verify no regressions
 
 ## Index Design Principles (CRITICAL)
 **Primary Goal:** Minimize expensive S3 document fetches during queries.

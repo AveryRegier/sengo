@@ -145,3 +145,5 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+tests/sengo-test-future-phases/

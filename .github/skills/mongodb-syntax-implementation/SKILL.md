@@ -275,10 +275,33 @@ db.myCollection.find({ value: { $myOp: 42 } }, { explain: 'executionStats' })
 6. **Explain Mode**: Must work with your feature; add tests early
 7. **Both Backends**: Support S3 and Memory (or document limitation clearly)
 
+## CRITICAL Process Rules
+
+**BEFORE implementing:**
+- ✅ Run `npm test` and **document baseline test counts** (Test Files passed/failed, Tests passed/failed)
+- ✅ Verify what test files already exist (provided by user vs pre-existing)
+- ✅ Identify which tests are Phase 1/2/3 and only implement the requested phase
+
+**AFTER implementing:**
+- ✅ Run `npm test` and **compare against baseline**
+- ✅ Verify previously passing tests still pass (must be 100% - no regressions)
+- ✅ Only new Phase N failures are acceptable (Phase N+1/N+2 features not yet implemented)
+- ✅ For conditional writes specifically: verify no failures in explain-mode, updateOne-byId, collectionIndex tests
+
+**DO NOT:**
+- ❌ Push to git (let user decide when to push)
+- ❌ Call task_complete until full test suite passes baseline comparison
+- ❌ Mark "complete" if there are unexpected test failures in adjacent features
+- ❌ Commit if test results are unknown
+
 ## Validation Checklist
 
 Before considering the feature complete:
 
+- [ ] **Baseline verified**: Compared `npm test` results before and after
+- [ ] **No regressions**: All previously passing tests still pass
+- [ ] **Target phase passing**: All target phase tests (e.g., conditional-writes) pass
+- [ ] **Future phases only**: Only Phase N+1/N+2 failures are expected
 - [ ] MongoDB examples rewritten with original domain
 - [ ] All end-to-end tests pass with S3BucketSimulator
 - [ ] OO design: no switch/if chains, options objects used
