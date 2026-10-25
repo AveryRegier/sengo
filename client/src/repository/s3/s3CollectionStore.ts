@@ -510,6 +510,23 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     throw new PreconditionFailedError(`Failed to update document after ${MAX_RETRIES} attempts`);
   }
 
+  async insertOneWithDuplicateCheck(id: any, doc: WithId<T>): Promise<void> {
+    const logger = getLogger();
+    try {
+      logger.debug('Inserting document with duplicate check', { _id: id });
+      // Use IfNoneMatch: '*' to ensure the document doesn't already exist
+      await this.replaceOne({ _id: id }, doc, { ifNoneMatch: '*' });
+    } catch (err: any) {
+      // Handle S3 412 (PreconditionFailed) as DuplicateKeyError
+      if (err.$metadata?.httpStatusCode === 412 || err.name === 'PreconditionFailed') {
+        throw new DuplicateKeyError(
+          `E11000 duplicate key error collection: ${this.collection} index: _id_ dup key: { _id: ${id} }`
+        );
+      }
+      throw err;
+    }
+  }
+
   async close() {
     this.closed = true;
   }

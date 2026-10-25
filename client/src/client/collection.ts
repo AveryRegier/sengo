@@ -78,17 +78,9 @@ export class SengoCollection<T> {
       const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
       logger.debug('Inserting document', { doc: docWithId });
       
-      // Use IfNoneMatch: '*' to ensure the document doesn't already exist
-      try {
-        await this.store.replaceOne({ _id: docWithId._id }, docWithId, { ifNoneMatch: '*' });
-      } catch (err: any) {
-        // Handle S3 412 (PreconditionFailed) as DuplicateKeyError
-        if (err.$metadata?.httpStatusCode === 412 || err.name === 'PreconditionFailed') {
-          throw new DuplicateKeyError(`E11000 duplicate key error collection: ${this.name} index: _id_ dup key: { _id: ${docWithId._id} }`);
-        }
-        throw err;
-      }
-      
+      // Delegate to store for duplicate key checking
+      await this.store.insertOneWithDuplicateCheck(docWithId._id, docWithId as WithId<T>);
+
       const indexes = await this.store.getIndexes();
       const indexNames: string[] = [];
       // Index maintenance: update all indexes

@@ -2,7 +2,7 @@ import type { CandidateLoadDocuments, CollectionStore } from '../index';
 import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
-import { MongoClientClosedError, MongoServerError } from '../../errors.js';
+import { MongoClientClosedError, MongoServerError, DuplicateKeyError } from '../../errors.js';
 import { FindCursor, WithId } from '../../types';
 import { ExplainSink } from '../../client/explain';
 
@@ -266,6 +266,19 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     }
 
     throw new MongoServerError(`Failed to update document after ${MAX_RETRIES} attempts`);
+  }
+
+  async insertOneWithDuplicateCheck(id: any, doc: WithId<T>): Promise<void> {
+    this.checkClosure();
+    // Check if document with this _id already exists
+    const existing = this.documents.find(d => d._id?.toString() === id?.toString());
+    if (existing) {
+      throw new DuplicateKeyError(
+        `E11000 duplicate key error collection: ${this.name} index: _id_ dup key: { _id: ${id} }`
+      );
+    }
+    // Insert new document
+    this.documents.push({ ...doc } as WithId<T> & { [key: string]: any });
   }
 
   async dropIndex(name: string): Promise<void> {
