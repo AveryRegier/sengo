@@ -42,7 +42,6 @@ export type IndexEntryMutation =
 
 export class IndexEntry {
   private ids: string[] = [];  // Maintain sorted order
-  etag?: string;
   loadedAt: number;
   dirty: boolean = false;
   added: Set<string> | undefined = undefined;
@@ -52,10 +51,9 @@ export class IndexEntry {
   private mutations: IndexEntryMutation[] = [];
   private nextMutationSequence = 0;
 
-  constructor(keys: NormalizedIndexKeyRecord[], data: string = '[]', etag?: string) {
+  constructor(keys: NormalizedIndexKeyRecord[], data: string = '[]') {
     this.keys = keys;
     this.deserialize(data);
-    this.etag = etag;
     this.loadedAt = Date.now();
   }
 
@@ -149,9 +147,8 @@ export class IndexEntry {
     return false;
   }
 
-  public update(newData: string, etag?: string): void {
+  public update(newData: string): void {
     this.replaceCommitted(newData, 0);
-    this.etag = etag || this.etag;
   }
 
   public getPendingMutations(): IndexEntryMutation[] {
@@ -362,8 +359,8 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   /**
    * Factory method to create IndexEntry instances with proper keys configuration.
    */
-  protected createEntry(data: string = '[]', etag?: string): IndexEntry {
-    return new IndexEntry(this.keys, data, etag);
+  protected createEntry(data: string = '[]'): IndexEntry {
+    return new IndexEntry(this.keys, data);
   }
 
   /**
