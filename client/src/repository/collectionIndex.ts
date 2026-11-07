@@ -36,6 +36,10 @@ export type IndexOptions = {
   limit?: number;
 };
 
+export type IndexEntryMutation =
+  | { sequence: number; kind: 'add'; id: string; sortValue?: any }
+  | { sequence: number; kind: 'remove'; id: string };
+
 export class IndexEntry {
   private ids: string[] = [];  // Maintain sorted order
   etag?: string;
@@ -45,6 +49,8 @@ export class IndexEntry {
   removed: Set<string> | undefined = undefined;
   private keys: NormalizedIndexKeyRecord[];  // Index definition
   private sortValues: Map<string, any> = new Map();  // Maps id -> secondary key value for sorting
+  private mutations: IndexEntryMutation[] = [];
+  private nextMutationSequence = 0;
 
   constructor(keys: NormalizedIndexKeyRecord[], data: string = '[]', etag?: string) {
     this.keys = keys;
@@ -53,7 +59,7 @@ export class IndexEntry {
     this.loadedAt = Date.now();
   }
 
-  public add(id: string, sortValue?: any): boolean {
+  public add(id: string, sortValue?: any, recordMutation = true): boolean {
     const existingIndex = this.ids.indexOf(id);
     if (existingIndex !== -1) {
       return false; // Already exists
@@ -99,6 +105,9 @@ export class IndexEntry {
     }
     this.added.add(id);
     this.dirty = true;
+    if (recordMutation) {
+      this.mutations.push({ sequence: ++this.nextMutationSequence, kind: 'add', id, sortValue });
+    }
     return true;
   }
 
@@ -118,7 +127,7 @@ export class IndexEntry {
     return sortKeyOrder === -1 ? -comparison : comparison;
   }
 
-  public remove(id: string): boolean {
+  public remove(id: string, recordMutation = true): boolean {
     const index = this.ids.indexOf(id);
     if (index !== -1) {
       this.ids.splice(index, 1);
@@ -132,41 +141,41 @@ export class IndexEntry {
       }
       this.removed.add(id);
       this.dirty = true;
+      if (recordMutation) {
+        this.mutations.push({ sequence: ++this.nextMutationSequence, kind: 'remove', id });
+      }
       return true;
     }
     return false;
   }
 
   public update(newData: string, etag?: string): void {
-    // Preserve added/removed items and their sort values
-    const preservedSortValues = new Map<string, any>();
-    this.added?.forEach(id => {
-      const sortValue = this.sortValues.get(id);
-      if (sortValue !== undefined) {
-        preservedSortValues.set(id, sortValue);
-      }
-    });
-    
-    this.deserialize(newData);
+    this.replaceCommitted(newData, 0);
     this.etag = etag || this.etag;
+  }
+
+  public getPendingMutations(): IndexEntryMutation[] {
+    return this.mutations.map(mutation => ({ ...mutation }));
+  }
+
+  public replaceCommitted(newData: string, acknowledgedThrough: number): void {
+    const pending = this.mutations.filter(mutation => mutation.sequence > acknowledgedThrough);
+    this.deserialize(newData);
+    this.added = undefined;
+    this.removed = undefined;
+    this.dirty = false;
+    this.mutations = pending;
     this.loadedAt = Date.now();
 
-    // Re-add items that were added locally
-    this.added?.forEach(id => {
-      if (!this.ids.includes(id)) {
-        const preservedValue = preservedSortValues.get(id);
-        this.add(id, preservedValue);
+    for (const mutation of pending) {
+      if (mutation.kind === 'add') {
+        this.add(mutation.id, mutation.sortValue, false);
+      } else {
+        this.remove(mutation.id, false);
       }
-    });
-    
-    // Remove items that were removed locally
-    this.removed?.forEach(id => {
-      const index = this.ids.indexOf(id);
-      if (index !== -1) {
-        this.ids.splice(index, 1);
-        this.sortValues.delete(id);
-      }
-    });
+    }
+
+    this.dirty = pending.length > 0;
   }
 
   // used by searches
@@ -573,5 +582,3 @@ export function normalizeIndexKeys(keys: IndexDefinition | IndexDefinition[]): N
   }).flat();
   return normalizedKeys;
 }
-
-

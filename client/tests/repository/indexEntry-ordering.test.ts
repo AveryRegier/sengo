@@ -142,4 +142,31 @@ describe('IndexEntry ordering by secondary key', () => {
     const result = entry.toArray();
     expect(result).toEqual(['id4', 'id3', 'id2']); // sorted: 40, 30, 20 (id1 removed)
   });
+
+  it('should acknowledge only persisted mutations and replay later changes', () => {
+    const entry = new IndexEntry([]);
+    entry.add('persisted');
+    entry.add('still-pending');
+    const mutations = entry.getPendingMutations();
+
+    entry.replaceCommitted(JSON.stringify(['persisted']), mutations[0].sequence);
+
+    expect(entry.toArray()).toEqual(['persisted', 'still-pending']);
+    expect(entry.getPendingMutations()).toEqual([mutations[1]]);
+    expect(entry.dirty).toBe(true);
+  });
+
+  it('should replay ordered add and remove operations against refreshed data', () => {
+    const entry = new IndexEntry([], JSON.stringify(['removed-remotely']));
+    entry.remove('removed-remotely');
+    entry.add('added-locally');
+
+    entry.update(JSON.stringify(['removed-remotely', 'other-writer']));
+
+    expect(entry.toArray()).toEqual(['other-writer', 'added-locally']);
+    expect(entry.getPendingMutations().map(({ kind, id }) => [kind, id])).toEqual([
+      ['remove', 'removed-remotely'],
+      ['add', 'added-locally'],
+    ]);
+  });
 });
