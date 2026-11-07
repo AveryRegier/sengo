@@ -315,7 +315,7 @@ describe('IndexEntry optimization with $limit and comparison operators', () => {
       entry.add('id5', '');
       
       const result = entry.toArray({ priority: { $exists: true } });
-      expect(result).toEqual(['id1', 'id4']); // Values that exist (not undefined/null/'')
+      expect(result).toEqual(['id3', 'id5', 'id1', 'id4']); // Null and empty string are present values
     });
 
     it('should filter with $exists: false', () => {
@@ -331,7 +331,7 @@ describe('IndexEntry optimization with $limit and comparison operators', () => {
       entry.add('id5', '');
       
       const result = entry.toArray({ priority: { $exists: false } });
-      expect(result.sort()).toEqual(['id2', 'id3', 'id5']); // undefined, null, or ''
+      expect(result).toEqual(['id2']); // Only undefined is missing
     });
   });
 

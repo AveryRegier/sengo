@@ -1,4 +1,5 @@
 import { getOperator } from './expr/index';
+import { resolveFieldPath } from '../util/fieldPath';
 
 /**
  * MongoDB-like query expression operators and evaluation functions.
@@ -75,6 +76,34 @@ export function evaluateComparison(foundValue: any, queryValue: any, fieldKey?: 
     );
   }
   return foundValue?.toString() === queryValue?.toString();
+}
+
+export function evaluateFieldPathComparison(
+  document: unknown,
+  fieldPath: string,
+  queryValue: any,
+): boolean {
+  const resolution = resolveFieldPath(document, fieldPath);
+  const values = resolution.values.map(value => value.value);
+  const candidates = values.length > 0 ? values : [undefined];
+
+  if (isOperatorObject(queryValue)) {
+    return Object.entries(queryValue)
+      .filter(([key]) => key.startsWith('$'))
+      .every(([op, operand]) => {
+        const operator = getOperator(op);
+        if (!operator) return false;
+        if (op === '$exists') {
+          return resolution.exists === Boolean(operand);
+        }
+        if (op === '$ne' || op === '$nin') {
+          return candidates.every(value => operator.match(value, operand, fieldPath));
+        }
+        return candidates.some(value => operator.match(value, operand, fieldPath));
+      });
+  }
+
+  return candidates.some(value => evaluateComparison(value, queryValue, fieldPath));
 }
 
 function isOperatorObject(value: any): value is Record<string, any> {

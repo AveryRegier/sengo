@@ -13,7 +13,8 @@ describe('ExistsOperator', () => {
   });
 
   it('compares for index usage', () => {
-    expect(op.compare(null, false)).toBe(true);
+    expect(op.compare(null, false)).toBe(false);
+    expect(op.compare(undefined, false)).toBe(true);
   });
 
   it('throws for expression context', () => {

@@ -5,7 +5,7 @@ import { CreateIndexOptions, FindCursor, IndexDefinition, WithId } from '../type
 import { getLogger } from './logger';
 import logger, { Follower } from 'clox';
 import { sort, Sort } from '../util/sort.js';
-import { evaluateComparison } from './expression.js';
+import { evaluateFieldPathComparison } from './expression.js';
 import { getOperator } from './expr/index';
 import { createExplainSink, ExplainResult, ExplainSink, ExplainVerbosity } from './explain';
 
@@ -44,8 +44,7 @@ export class SengoCollection<T> {
     for (const [key, value] of Object.entries(filter)) {
       if (key === '$or') continue; // Already handled above
       
-      const docValue = doc[key];
-      if (!evaluateComparison(docValue, value, key)) {
+      if (!evaluateFieldPathComparison(doc, key, value)) {
         return false;
       }
     }
@@ -621,8 +620,6 @@ function filterMatchingDocuments<T>(docs: WithId<T>[], query: Record<string, any
 }
 
 function match(parsed: Record<string, any>, k: string, v: any): unknown {
-  const foundValue = parsed[k];
-  
   // Handle special $or operator
   if (v?.$or) {
     return matchesOrArray(parsed, v.$or);
@@ -631,8 +628,7 @@ function match(parsed: Record<string, any>, k: string, v: any): unknown {
     return matchesOrArray(parsed, v);
   }
   
-  // Use centralized comparison evaluation
-  return evaluateComparison(foundValue, v, k);
+  return evaluateFieldPathComparison(parsed, k, v);
 }
 
 function matchesOrArray(parsed: Record<string, any>, arr: unknown): boolean {
