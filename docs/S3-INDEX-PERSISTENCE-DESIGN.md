@@ -151,14 +151,24 @@ Do not add ETag, conditional-write, or retry parameters to `CollectionStore`, `C
 
 Use two independent `S3CollectionStore` / `S3CollectionIndex` instances with private caches and one shared `S3BucketSimulator`. A single store with `Promise.all` is insufficient because it does not exercise separate in-memory state.
 
-Add deterministic simulator coordination, not timing sleeps:
+Use deterministic read coordination, not timing sleeps:
 
-- Pause two reads after both have observed the same body/ETag, then release them together.
+- Pause two reads after both have returned the same body/ETag, then release them together.
 - Capture conditional headers for each PutObject.
 - Ensure simulator conditional checks and writes execute atomically.
-- Support injected read failures, put failures, and retry exhaustion.
+- Exercise missing-object creation and injected conflict/failure paths.
 
-Tests must assert both final stored JSON and request conditions. Existing `ConcurrentIndexUpdate.test.ts` is a starting point, but its current sequential inserts do not cover the race.
+Tests must assert both final stored JSON and request conditions. `ConcurrentIndexUpdate.test.ts` uses a gated S3 client over the shared simulator to force stale-read races.
+
+## Implemented behavior
+
+- `IndexEntry` records ordered, sequence-numbered add/remove operations and can replay unacknowledged operations onto refreshed serialized data. The shared entry has no ETag state.
+- `S3CollectionIndex` stores object existence and ETags privately, reloads the authoritative entry before each write, and uses `IfNoneMatch: '*'` for creation or `IfMatch` for replacement.
+- Conditional conflicts trigger an initial attempt plus up to three load/replay retries. Exhaustion and other S3 failures reject the mutation; no delayed retry is reported as success.
+- Mutations to the same entry key are serialized within one process. Mutations to distinct keys remain parallel. A successful awaited mutation is persisted before it resolves.
+- `flush()` waits for outstanding writes and reports persistence failures. It also reports failures retained from mutations that completed unsuccessfully before `flush()` was called.
+- Fresh reads before writes add an S3 read to index-entry mutations. This is intentional: it supplies the authoritative body and ETag needed to merge independent processes safely.
+- Deterministic two-instance tests gate reads after both responses are captured, then verify conditional conflicts and replay for create, add/add, and add/remove races.
 
 ## Implementation sequence
 
