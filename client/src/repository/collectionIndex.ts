@@ -1,5 +1,5 @@
 import { IndexDefinition, IndexKeyRecord, Order } from "../types";
-import { MongoInvalidArgumentError, MongoServerError } from '../errors.js';
+import { DuplicateKeyError, MongoInvalidArgumentError, MongoServerError } from '../errors.js';
 import type { NormalizedIndexKeyRecord } from "./index.js";
 import { SortDirection } from "../util/sort";
 import { ComparisonOperators, getComparisonFn } from '../client/expression.js';
@@ -7,6 +7,35 @@ import type { ExplainSink } from '../client/explain';
 import logger from "../client/logger";
 import { addContext, addContexts, MetaDataValue } from "clox";
 import { getFieldPathValues, resolveFieldPath } from '../util/fieldPath';
+
+function areIndexValuesEqual(left: unknown, right: unknown): boolean {
+  return encodeUniqueIndexValue(left) === encodeUniqueIndexValue(right);
+}
+
+function encodeUniqueIndexValue(value: any): string {
+  if (value === undefined || value === null) return 'null';
+  if (value instanceof Date) return `date:${value.toISOString()}`;
+  if (typeof value === 'string') return `string:${JSON.stringify(value)}`;
+  if (typeof value === 'number') return `number:${Object.is(value, -0) ? '-0' : String(value)}`;
+  if (typeof value === 'boolean') return `boolean:${value}`;
+  if (typeof value === 'bigint') return `bigint:${value.toString()}`;
+  if (Array.isArray(value)) {
+    return `array:[${value.map(encodeUniqueIndexValue).map(item => JSON.stringify(item)).join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    if (typeof value._bsontype === 'string') {
+      const serializedValue = typeof value.toHexString === 'function'
+        ? value.toHexString()
+        : value.toString();
+      return `bson:${value._bsontype}:${serializedValue}`;
+    }
+    const fields = Object.keys(value).sort().map(key =>
+      `${JSON.stringify(key)}:${JSON.stringify(encodeUniqueIndexValue(value[key]))}`
+    );
+    return `object:{${fields.join(',')}}`;
+  }
+  return `${typeof value}:${String(value)}`;
+}
 
 export interface CollectionIndex {
   name: string;
@@ -53,7 +82,7 @@ export class IndexEntry {
   private mutations: IndexEntryMutation[] = [];
   private nextMutationSequence = 0;
 
-  constructor(keys: NormalizedIndexKeyRecord[], data: string = '[]') {
+  constructor(keys: NormalizedIndexKeyRecord[], data: string = '[]', private readonly unique = false) {
     this.keys = keys;
     this.deserialize(data);
     this.loadedAt = Date.now();
@@ -63,6 +92,16 @@ export class IndexEntry {
     const existingIndex = this.ids.indexOf(id);
     if (existingIndex !== -1) {
       return false; // Already exists
+    }
+
+    if (this.unique) {
+      const duplicateIndex = this.ids.findIndex((existingId, index) =>
+        existingId !== id &&
+        (this.keys.length === 1 || areIndexValuesEqual(this.sortValues.get(existingId), sortValue))
+      );
+      if (duplicateIndex !== -1) {
+        throw new DuplicateKeyError(`E11000 duplicate key error dup key: ${JSON.stringify(sortValue ?? null)}`);
+      }
     }
 
     const hasSortKey = this.keys.length > 1;
@@ -364,7 +403,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
    * Factory method to create IndexEntry instances with proper keys configuration.
    */
   protected createEntry(data: string = '[]'): IndexEntry {
-    return new IndexEntry(this.keys, data);
+    return new IndexEntry(this.keys, data, this.unique);
   }
 
   /**
@@ -421,6 +460,10 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     // Handle results if needed
     const errors = results.filter(r => r.status === 'rejected').map(r => (r as PromiseRejectedResult).reason);
     if (errors.length) {
+      const duplicateKeyError = errors.find(error => error instanceof DuplicateKeyError);
+      if (duplicateKeyError) {
+        throw duplicateKeyError;
+      }
       throw new MongoServerError(`Failed to update index for keys: ${errors.map(e => e.message).join(', ')}`,  { cause: errors[0] });
     }
     return void 0;
@@ -493,7 +536,9 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     const keysForIndexPath = validKeys.length > 1 ? validKeys.slice(0, -1) : validKeys;
     
     return keysForIndexPath.reduce((acc, key) => {
-      const newKeys = this.getIndexFieldValues(doc, key.field).map(value => `${value}`);
+      const newKeys = this.getIndexFieldValues(doc, key.field).map(value =>
+        this.unique ? encodeUniqueIndexValue(value) : `${value}`
+      );
       if (acc.length === 0) {
         return newKeys;
       }
@@ -505,6 +550,16 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     return getFieldPathValues(doc, field).flatMap(({ value }) =>
       Array.isArray(value) ? value : [value]
     );
+  }
+
+  public hasSameUniqueKey(left: Record<string, any>, right: Record<string, any>): boolean {
+    if (!this.unique) return false;
+    return this.keys.every(key => {
+      const leftValues = this.getIndexFieldValues(left, key.field).map(encodeUniqueIndexValue);
+      const rightValues = this.getIndexFieldValues(right, key.field).map(encodeUniqueIndexValue);
+      return leftValues.length === rightValues.length &&
+        leftValues.every((value, index) => value === rightValues[index]);
+    });
   }
 
   protected async persist(key: string, entry: IndexEntry): Promise<void> {
@@ -540,17 +595,17 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
 
     if (typeof valueToFind === 'object' && !Array.isArray(valueToFind)) {
       if (Array.isArray(valueToFind.$in)) {
-        return valueToFind.$in.map((v: any) => `${v}`);
+        return valueToFind.$in.map((v: any) => this.unique ? encodeUniqueIndexValue(v) : `${v}`);
       }
 
       if (valueToFind.$eq !== undefined) {
-        return [`${valueToFind.$eq}`];
+        return [this.unique ? encodeUniqueIndexValue(valueToFind.$eq) : `${valueToFind.$eq}`];
       }
 
       return null;
     }
 
-    return [`${valueToFind}`];
+    return [this.unique ? encodeUniqueIndexValue(valueToFind) : `${valueToFind}`];
   }
 
   removeIdFromAllKeys<U>(id: string, doc: Record<string, any>): unknown {

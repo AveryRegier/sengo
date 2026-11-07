@@ -1,5 +1,5 @@
 import { MongoClientClosedError, MongoServerError, DuplicateKeyError, PreconditionFailedError } from '../errors.js';
-import { CandidateLoadDocuments, normalizeIndexKeys, type CollectionStore } from '../repository/index';
+import { CandidateLoadDocuments, normalizeIndexKeys, type CollectionIndex, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { CreateIndexOptions, FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
@@ -20,6 +20,27 @@ export type CountDocumentsOptions = {
   limit?: number;
   explain?: ExplainVerbosity;
 };
+
+const storeWriteQueues = new WeakMap<object, Promise<void>>();
+
+async function serializeStoreWrite<T>(store: object, operation: () => Promise<T>): Promise<T> {
+  const previous = storeWriteQueues.get(store) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const queued = previous.then(() => gate);
+  storeWriteQueues.set(store, queued);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (storeWriteQueues.get(store) === queued) {
+      storeWriteQueues.delete(store);
+    }
+  }
+}
 
 export class SengoCollection<T> {
   name: string;
@@ -77,19 +98,45 @@ export class SengoCollection<T> {
       const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
       logger.debug('Inserting document', { doc: docWithId });
       
-      // Delegate to store for insertion with duplicate key checking
-      await this.store.insertOne(docWithId._id, docWithId as WithId<T>);
-
       const indexes = await this.store.getIndexes();
       const indexNames: string[] = [];
-      // Index maintenance: update all indexes
-      for (const [name, index] of indexes) {
-        indexNames.push(name);
-        // Only call updateIndexOnDocumentUpdate, which is the public API
-        logger.debug('Adding doc to index', { name, doc: docWithId });
-        // For insert, treat as oldDoc = {} (no-op) and newDoc = docWithId
-        await index.addDocument(docWithId);
-      }
+      await serializeStoreWrite(this.store, async () => {
+        const claimedUniqueIndexes: CollectionIndex[] = [];
+        try {
+          for (const [name, index] of indexes) {
+            indexNames.push(name);
+            if (index.unique) {
+              await index.addDocument(docWithId);
+              claimedUniqueIndexes.push(index);
+            }
+          }
+
+          await this.store.insertOne(docWithId._id, docWithId as WithId<T>);
+
+          for (const [name, index] of indexes) {
+            if (!index.unique) {
+              logger.debug('Adding doc to index', { name, doc: docWithId });
+              await index.addDocument(docWithId);
+            }
+          }
+        } catch (error) {
+          const cleanupErrors: unknown[] = [];
+          for (const index of claimedUniqueIndexes.reverse()) {
+            try {
+              await index.removeDocument(docWithId);
+            } catch (cleanupError) {
+              cleanupErrors.push(cleanupError);
+            }
+          }
+          if (cleanupErrors.length > 0) {
+            throw new MongoServerError(
+              `Insert failed and ${cleanupErrors.length} unique index claim(s) could not be rolled back`,
+              { cause: error instanceof Error ? error : new Error(String(error)) },
+            );
+          }
+          throw error;
+        }
+      });
       const result = { acknowledged: true, insertedId: docWithId._id };
       sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
       sink.onOpEnd(true, Date.now() - startMs);
