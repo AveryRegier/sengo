@@ -6,6 +6,7 @@ import { ComparisonOperators, getComparisonFn } from '../client/expression.js';
 import type { ExplainSink } from '../client/explain';
 import logger from "../client/logger";
 import { addContext, addContexts, MetaDataValue } from "clox";
+import { getFieldPathValues, resolveFieldPath } from '../util/fieldPath';
 
 export interface CollectionIndex {
   name: string;
@@ -391,7 +392,9 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   public async addDocument(doc: Record<string, any>): Promise<void> {
     return await this.changeIndex(doc,  (entry, id, keys) => {
       // If there are multiple keys, extract the final key's value for sorting
-      const sortValue = keys.length > 1 ? doc[keys[keys.length - 1].field] : undefined;
+      const sortValue = keys.length > 1
+        ? this.getIndexFieldValues(doc, keys[keys.length - 1].field)[0]
+        : undefined;
       return entry.add(id, sortValue);
     });
   }
@@ -476,15 +479,9 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     const validKeys: NormalizedIndexKeyRecord[] = [];
     // we have to stop the key generation once any field is not defined
     this.keys.forEach(key => {
-      const valueToFind = doc[key.field];
-      if (valueToFind !== undefined) {
-        if (Array.isArray(valueToFind)) {
-          if (valueToFind.length > 0) {
-            validKeys.push(key);
-          }
-        } else {
-          validKeys.push(key);
-        }
+      const resolution = resolveFieldPath(doc, key.field);
+      if (resolution.exists && this.getIndexFieldValues(doc, key.field).length > 0) {
+        validKeys.push(key);
       }
     });
     return validKeys;
@@ -496,18 +493,18 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     const keysForIndexPath = validKeys.length > 1 ? validKeys.slice(0, -1) : validKeys;
     
     return keysForIndexPath.reduce((acc, key) => {
-      const valueToFind = doc[key.field];
-      let newKeys: string[] = [];
-      if (Array.isArray(valueToFind)) {
-        newKeys = valueToFind.map((v: string) => `${v}`);
-      } else {
-        newKeys = [`${valueToFind}`];
-      }
+      const newKeys = this.getIndexFieldValues(doc, key.field).map(value => `${value}`);
       if (acc.length === 0) {
         return newKeys;
       }
       return newKeys.map((v: string) => acc.map((current: string) => `${current}|${v}`)).flat();
     }, [] as string[]);
+  }
+
+  private getIndexFieldValues(doc: Record<string, any>, field: string): any[] {
+    return getFieldPathValues(doc, field).flatMap(({ value }) =>
+      Array.isArray(value) ? value : [value]
+    );
   }
 
   protected async persist(key: string, entry: IndexEntry): Promise<void> {
@@ -532,7 +529,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   protected hasFirstKey(doc: Record<string, any>): boolean {
-    const value = doc[this.keys[0]?.field];
+    const value = this.getIndexFieldValues(doc, this.keys[0]?.field ?? '')[0];
     return value !== undefined && value !== null && value !== '';
   }
 

@@ -48,6 +48,14 @@ describe('dotted field paths in queries', () => {
     ]);
   });
 
+  it('uses shared field paths when building and querying an index', async () => {
+    await collection.createIndex({ 'profile.city': 1 });
+
+    await expect(collection.find({ 'profile.city': 'Lisbon' }).toArray()).resolves.toMatchObject([
+      { _id: 'south' },
+    ]);
+  });
+
   it('reuses field-path matching when validating update filters', async () => {
     const result = await collection.updateOne(
       { 'profile.city': 'Oslo' },
