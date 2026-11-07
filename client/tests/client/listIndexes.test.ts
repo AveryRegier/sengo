@@ -70,6 +70,18 @@ describe('SengoCollection listIndexes', () => {
     expect(compoundIndex?.v).toBe(2);
   });
 
+  it('includes unique for unique indexes but omits it for non-unique indexes', async () => {
+    await collection.createIndex({ email: 1 }, { unique: true });
+    await collection.createIndex({ name: 1 }, { unique: false });
+
+    const indexes = await collection.listIndexes();
+    expect(indexes.find(idx => idx.name === 'email_1')).toMatchObject({
+      key: { email: 1 },
+      unique: true,
+    });
+    expect(indexes.find(idx => idx.name === 'name_1')).not.toHaveProperty('unique');
+  });
+
   it('should match MongoDB output format', async () => {
     await collection.createIndex({ email: 1 });
     

@@ -10,6 +10,7 @@ import { addContext, addContexts, MetaDataValue } from "clox";
 export interface CollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
+  unique: boolean;
   canSatisfyQuery(query: Record<string, any>): boolean;
   scoreForQuery(query: Record<string, any>, options?: any, sink?: ExplainSink): number;
   findKeysForQuery(query: Record<string, any>, sink?: ExplainSink): string[];
@@ -288,10 +289,12 @@ export class IndexEntry {
 export abstract class BaseCollectionIndex implements CollectionIndex {
   name: string;
   keys: NormalizedIndexKeyRecord[];
+  unique: boolean;
 
-  constructor(name: string, keys: NormalizedIndexKeyRecord[]) {
+  constructor(name: string, keys: NormalizedIndexKeyRecord[], unique = false) {
     this.name = name;
     this.keys = keys;
+    this.unique = unique;
   }
 
   // --- Public API ---

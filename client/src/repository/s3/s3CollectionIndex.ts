@@ -24,9 +24,9 @@ export class S3CollectionIndex extends BaseCollectionIndex {
   constructor(
     name: string,
     keys: { field: string; order: 1 | -1 | 'text' }[],
-    opts: { s3: S3Client; collectionName: string; bucket: string }
+    opts: { s3: S3Client; collectionName: string; bucket: string; unique?: boolean }
   ) {
-    super(name, keys);
+    super(name, keys, opts.unique === true);
     this.s3 = opts.s3;
     this.collectionName = opts.collectionName;
     this.bucket = opts.bucket;

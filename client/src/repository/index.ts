@@ -1,6 +1,6 @@
 import { FindOptions } from '../client/collection';
 import { ExplainSink } from '../client/explain';
-import { FindCursor, Order, WithId } from '../types';
+import { CreateIndexOptions, FindCursor, Order, WithId } from '../types';
 import { CollectionIndex } from './collectionIndex';
 import { MemoryStore } from './memory/index';
 import { S3Store } from './s3/index';
@@ -29,7 +29,7 @@ export type CandidateLoadDocuments<T> = (request: CandidateLoadRequest<T>) => Pr
 export interface CollectionStore<T> {
   getIndexes(): Promise<Map<string, CollectionIndex>>;
   close(): Promise<void>;
-  createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex>;
+  createIndex(name: string, keys: NormalizedIndexKeyRecord[], options?: CreateIndexOptions): Promise<CollectionIndex>;
   deleteOne(doc: WithId<T>): Promise<void>;
   dropIndex(name: string): Promise<void>;
   findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink, loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]>

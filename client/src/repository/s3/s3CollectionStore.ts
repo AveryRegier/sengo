@@ -13,6 +13,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 import { WithId } from '../../types.js';
+import { CreateIndexOptions } from '../../types.js';
 import { getLogger } from '../../client/logger.js';
 import { get } from 'http';
 import { FindOptions } from '../../index.js';
@@ -344,11 +345,11 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     return docs;
   }
 
-  async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
+  async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[], options?: CreateIndexOptions): Promise<CollectionIndex> {
     if (this.closed) throw new Error('Store is closed');
     await this.ensureIndexesLoaded();
     // 1. Create and persist the index metadata file
-    const index = { name, keys };
+    const index = { name, keys, ...(options?.unique === true ? { unique: true } : {}) };
     const args = {
       Bucket: this.bucket,
       Key: `${this.collection}/indices/${name}.json`,
@@ -362,6 +363,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       s3: this.s3,
       collectionName: this.collection,
       bucket: this.bucket,
+      unique: options?.unique,
     });
     // Expose last created index instance for test synchronization
     (this as any).lastIndexInstance = s3Index;
@@ -395,11 +397,13 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
         const meta = JSON.parse(data);
         const indexName = meta.name;
         const indexKeys = meta.keys;
+        const unique = meta.unique === true;
         if (!this.loadedIndexes.has(indexName)) {
           this.loadedIndexes.set(indexName, new S3CollectionIndex(indexName, indexKeys, {
             s3: this.s3,
             collectionName: this.collection,
             bucket: this.bucket,
+            unique,
           }));
         }
       }

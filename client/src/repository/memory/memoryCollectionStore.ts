@@ -3,11 +3,15 @@ import { ObjectId } from 'bson';
 import type { CollectionIndex } from '../collectionIndex';
 import { BaseCollectionIndex } from '../collectionIndex';
 import { MongoClientClosedError, MongoServerError, DuplicateKeyError } from '../../errors.js';
-import { FindCursor, WithId } from '../../types';
+import { CreateIndexOptions, FindCursor, WithId } from '../../types';
 import { ExplainSink } from '../../client/explain';
 
 export class MemoryCollectionIndex extends BaseCollectionIndex implements CollectionIndex {
   private entries: Map<string, any> = new Map(); // Map from index key to IndexEntry
+
+  constructor(name: string, keys: { field: string; order: 1 | -1 | 'text' }[], unique = false) {
+    super(name, keys, unique);
+  }
 
   // Override fetch to return from memory
   protected async fetch(key: string, sink?: ExplainSink): Promise<any> {
@@ -189,9 +193,9 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
   }
 
 
-  async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
+  async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[], options?: CreateIndexOptions): Promise<CollectionIndex> {
     this.checkClosure();
-    const index = new MemoryCollectionIndex(name, keys);
+    const index = new MemoryCollectionIndex(name, keys, options?.unique === true);
     // Add all current documents to the index
     for (const doc of this.documents) {
       await index.addDocument(doc);

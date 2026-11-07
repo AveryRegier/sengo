@@ -1,7 +1,7 @@
 import { MongoClientClosedError, MongoServerError, DuplicateKeyError, PreconditionFailedError } from '../errors.js';
 import { CandidateLoadDocuments, normalizeIndexKeys, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
-import { FindCursor, IndexDefinition, WithId } from '../types';
+import { CreateIndexOptions, FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
 import logger, { Follower } from 'clox';
 import { sort, Sort } from '../util/sort.js';
@@ -476,13 +476,13 @@ export class SengoCollection<T> {
     }
   }
 
-  async createIndex(keys: IndexDefinition | IndexDefinition[]): Promise<string> {
+  async createIndex(keys: IndexDefinition | IndexDefinition[], options?: CreateIndexOptions): Promise<string> {
     const logger = getLogger();
     const normalizedKeys = normalizeIndexKeys(keys);
     // MongoDB-like index name: e.g. { name: 1, age: -1 } => 'name_1_age_-1'
     const fields = normalizedKeys.map(({ field, order }) => `${field}_${order}`).join('_');
     // Actually create the index in the store
-    const index = await this.store.createIndex(fields || 'default_index', normalizedKeys);
+    const index = await this.store.createIndex(fields || 'default_index', normalizedKeys, options);
     // Build the index here (assume contract is always fulfilled)
     logger.debug('Calling this.store.find({}) after index creation', { index: fields || 'default_index' });
     const allDocs = this.find({});
@@ -501,8 +501,8 @@ export class SengoCollection<T> {
    * List all indexes on the collection (MongoDB compatible: listIndexes / getIndexes)
    * Returns an array of index specifications including the default _id index.
    */
-  async listIndexes(): Promise<Array<{ v: number; key: Record<string, number>; name: string }>> {
-    const indexes: Array<{ v: number; key: Record<string, number>; name: string }> = [];
+  async listIndexes(): Promise<Array<{ v: number; key: Record<string, number>; name: string; unique?: true }>> {
+    const indexes: Array<{ v: number; key: Record<string, number>; name: string; unique?: true }> = [];
     
     // MongoDB always has an _id index
     indexes.push({
@@ -521,7 +521,8 @@ export class SengoCollection<T> {
       indexes.push({
         v: 2,
         key,
-        name
+        name,
+        ...(index.unique ? { unique: true as const } : {}),
       });
     }
 

@@ -3,6 +3,9 @@ import { SortDirection } from "./util/sort";
 export type Order = SortDirection | 'text';
 export type IndexKeyRecord = Record<string, Order>;
 export type IndexDefinition = string | IndexKeyRecord;
+export type CreateIndexOptions = {
+  unique?: boolean;
+};
 export type WithId<T> = T & { _id: string | number };
 export type Filter<T> = Partial<Record<keyof T, any>>; // not right yet
 export type Cursor<T> = {
@@ -14,4 +17,3 @@ export type Cursor<T> = {
 }
 
 export type FindCursor<T> = Cursor<T>;
-

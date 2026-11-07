@@ -122,6 +122,30 @@ describe('S3CollectionStore.createIndex and normalizeIndexKeys', () => {
     expect(putCalls.some(([cmd]: any[]) => cmd.input.Key.includes(`${collection}/indices/${indexName}/`))).toBe(true);
   }, 20000);
 
+  it('persists and reloads the unique index option', async () => {
+    const s3sim = new S3BucketSimulator();
+    const { store } = makeStoreWithSim(s3sim);
+    const collectionClient = new SengoCollection(collection, store);
+    const indexName = await collectionClient.createIndex({ foo: 1 }, { unique: true });
+
+    expect(JSON.parse(s3sim.getFile(`${collection}/indices/${indexName}.json`)!)).toMatchObject({
+      name: indexName,
+      unique: true,
+    });
+    expect((await store.getIndexes()).get(indexName)?.unique).toBe(true);
+
+    const reopenedStore = new S3CollectionStore(collection, bucket);
+    reopenedStore.s3.send = vi.fn(async (cmd: any) => s3sim.handleCommand(cmd)) as any;
+    const reopenedCollection = new SengoCollection(collection, reopenedStore);
+    const reopenedIndex = (await reopenedStore.getIndexes()).get(indexName);
+
+    expect(reopenedIndex?.unique).toBe(true);
+    expect(await reopenedCollection.listIndexes()).toEqual([
+      { v: 2, key: { _id: 1 }, name: '_id_' },
+      { v: 2, key: { foo: 1 }, name: indexName, unique: true },
+    ]);
+  });
+
   it('throws if store is closed', async () => {
     const s3sim = new S3BucketSimulator();
     (s3sim as any)._debugHash = shortHash();
