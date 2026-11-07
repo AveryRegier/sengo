@@ -71,6 +71,8 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   async dropIndex(name: string): Promise<void> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
     await this.ensureIndexesLoaded();
+    const prefix = `${this.collection}/indices/${name}/`;
+    const entryKeys = await this.listObjectKeys(prefix);
     // Delete index metadata file
     const metaKey = `${this.collection}/indices/${name}.json`;
     const args1 = {
@@ -80,22 +82,10 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     getLogger().debug(`Deleting index metadata from S3`, { command: "deleteObject", args: args1 });
     await this.s3.send(new DeleteObjectCommand(args1));
     // List and delete all entry files under the index prefix
-    const prefix = `${this.collection}/indices/${name}/`;
-    const args = {
-      Bucket: this.bucket,
-      Prefix: prefix,
-    };
-    getLogger().debug(`Listing objects from S3`, { command: "listObjectsV2", args });
-    const listed = await this.s3.send(new ListObjectsV2Command(args));
-    if (listed.Contents) {
-      for (const obj of listed.Contents) {
-        const args = {
-          Bucket: this.bucket,
-          Key: obj.Key,
-        };
-        getLogger().debug(`Deleting index entry from S3`, { command: "deleteObject", args });
-        await this.s3.send(new DeleteObjectCommand(args));
-      }
+    for (const key of entryKeys) {
+      const args = { Bucket: this.bucket, Key: key };
+      getLogger().debug(`Deleting index entry from S3`, { command: "deleteObject", args });
+      await this.s3.send(new DeleteObjectCommand(args));
     }
     // Remove from loadedIndexes
     this.loadedIndexes.delete(name);
@@ -110,6 +100,42 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       await this.loadIndexes();
       this.indexesLoaded = true;
     }
+  }
+
+  private async listObjectKeys(prefix: string, delimiter?: string): Promise<string[]> {
+    const keys: string[] = [];
+    const tokens = new Set<string>();
+    let continuationToken: string | undefined;
+    do {
+      const args = {
+        Bucket: this.bucket,
+        Prefix: prefix,
+        ...(delimiter !== undefined ? { Delimiter: delimiter } : {}),
+        ...(continuationToken !== undefined ? { ContinuationToken: continuationToken } : {}),
+      };
+      getLogger().debug('Listing objects from S3', { command: 'listObjectsV2', args });
+      let page;
+      try {
+        page = await this.s3.send(new ListObjectsV2Command(args));
+      } catch (error) {
+        if (continuationToken !== undefined && error instanceof Error && error.name === 'NoSuchBucket') {
+          throw new MongoServerError('S3 bucket disappeared during a paginated listing', { cause: error });
+        }
+        throw error;
+      }
+      for (const object of page.Contents ?? []) {
+        if (!object.Key) throw new MongoServerError('S3 listing returned an object without a key');
+        keys.push(object.Key);
+      }
+      if (!page.IsTruncated) break;
+      const next = page.NextContinuationToken;
+      if (!next || tokens.has(next)) {
+        throw new MongoServerError('S3 listing returned a missing or repeated continuation token');
+      }
+      tokens.add(next);
+      continuationToken = next;
+    } while (true);
+    return keys;
   }
 
   /**
@@ -302,15 +328,9 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   private async scan(sink?: ExplainSink, loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]> {
     const prefix = `${this.collection}/data/`;
     const scanStartedAtMs = Date.now();
-    let listed;
+    let keys: string[];
     try {
-      const args = {
-        Bucket: this.bucket,
-        Prefix: prefix,
-      };
-      getLogger().debug(`Listing objects from S3`, { command: "listObjectsV2", args });
-      listed = await this.s3.send(new ListObjectsV2Command(args));
-      if (!listed || !listed.Contents) return [];
+      keys = await this.listObjectKeys(prefix);
     } catch (err: any) {
       if (err.name === 'NoSuchBucket') return [];
       if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
@@ -319,7 +339,6 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       throw err;
     }
 
-    const keys = listed.Contents.map(obj => obj.Key!);
     const docs = await this.materializeCandidates(keys, 'scan', loadDocuments, false);
     sink?.onTimingPart('scan', Date.now() - scanStartedAtMs, docs.length);
     return docs;
@@ -327,7 +346,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[]): Promise<CollectionIndex> {
     if (this.closed) throw new Error('Store is closed');
-    this.ensureIndexesLoaded();
+    await this.ensureIndexesLoaded();
     // 1. Create and persist the index metadata file
     const index = { name, keys };
     const args = {
@@ -362,16 +381,8 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
    */
   async loadIndexes(): Promise<void> {
     const prefix = `${this.collection}/indices/`;
-    const args = {
-      Bucket: this.bucket,
-      Prefix: prefix,
-      Delimiter: '/'
-    };
-    getLogger().debug(`Listing objects from S3`, { command: "listObjectsV2", args });
-    const listed = await this.s3.send(new ListObjectsV2Command(args));
-    if (!listed.Contents) return;
-    for (const obj of listed.Contents) {
-      const key = obj.Key!;
+    const keys = await this.listObjectKeys(prefix, '/');
+    for (const key of keys) {
       // Only load index metadata files, not entry files
       // Metadata files are of the form: {collection}/indices/{indexName}.json (no further slashes after /indices/)
       const rel = key.slice((`${this.collection}/indices/`).length);
@@ -383,9 +394,9 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
         const data = await getBodyAsString(result);
         const meta = JSON.parse(data);
         const indexName = meta.name;
-        const keys = meta.keys;
+        const indexKeys = meta.keys;
         if (!this.loadedIndexes.has(indexName)) {
-          this.loadedIndexes.set(indexName, new S3CollectionIndex(indexName, keys, {
+          this.loadedIndexes.set(indexName, new S3CollectionIndex(indexName, indexKeys, {
             s3: this.s3,
             collectionName: this.collection,
             bucket: this.bucket,

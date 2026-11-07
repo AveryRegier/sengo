@@ -1,4 +1,5 @@
 import { Chance } from 'chance';
+import { createHash } from 'crypto';
 import { Readable } from 'stream';
 const chance = new Chance();
 
@@ -13,7 +14,7 @@ export class S3BucketSimulator {
   private getObjectCallCount: Record<string, number> = {};
   private etags: Record<string, string> = {}; // Store ETags for each file
 
-  constructor() {
+  constructor(private readonly options: { etagMode?: 'random' | 'content' } = {}) {
     // Allow external override for deterministic test output
     this._debugHash = Math.random().toString(36).slice(2, 8);
   }
@@ -163,7 +164,9 @@ export class S3BucketSimulator {
     }
 
     this.files[key] = b;
-    this.etags[key] = chance.guid(); // Generate a new ETag for the file
+    this.etags[key] = this.options.etagMode === 'content'
+      ? `"${createHash('md5').update(b, 'utf8').digest('hex')}"`
+      : chance.guid();
     // Log all index/document file writes
     if (key.includes('/indices/')) {
       this.indexAccessLog.push({ key, command: 'putObject' });
@@ -216,6 +219,14 @@ export class S3BucketSimulator {
   deleteObject(keyOrCmd: string | any) {
     const key = typeof keyOrCmd === 'string' ? keyOrCmd : S3BucketSimulator.extractKey(keyOrCmd);
     if (!key) return { DeleteMarker: false };
+    const ifMatch = S3BucketSimulator.extractIfMatch(keyOrCmd);
+    if (ifMatch !== undefined && (!(key in this.files) || (ifMatch !== '*' && this.etags[key] !== ifMatch))) {
+      const error = Object.assign(new Error('PreconditionFailed'), {
+        name: 'PreconditionFailed',
+        $metadata: { httpStatusCode: 412 },
+      });
+      throw error;
+    }
     // Log all index/document file deletes
     if (key.includes('/indices/')) {
       this.indexAccessLog.push({ key, command: 'deleteObject' });
