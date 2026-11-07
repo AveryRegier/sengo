@@ -30,14 +30,13 @@ export interface CollectionStore<T> {
   getIndexes(): Promise<Map<string, CollectionIndex>>;
   close(): Promise<void>;
   createIndex(name: string, keys: NormalizedIndexKeyRecord[]): Promise<CollectionIndex>;
-  deleteOne(id: any): Promise<void>;
+  deleteOne(doc: WithId<T>): Promise<void>;
   dropIndex(name: string): Promise<void>;
   findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink, loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]>
   isClosed(): boolean;
-  loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null>;
-  replaceOne(filter: Record<string, any>, doc: Record<string, any>, options?: { ifMatch?: string; ifNoneMatch?: string }): Promise<void>;
-  replaceOneWithRetry(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void>;
-  insertOneWithDuplicateCheck(id: any, doc: WithId<T>): Promise<void>;
+  replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void>;
+  insertOne(id: any, doc: WithId<T>): Promise<void>;
+  updateOne(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void>;
 }
 
 

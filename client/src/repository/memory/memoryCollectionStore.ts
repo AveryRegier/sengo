@@ -44,12 +44,6 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
       return Promise.resolve(this.indexes as Map<string, CollectionIndex>) ;
   }
 
-  async insertOne(doc: Record<string, any>) {
-    const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
-    await this.replaceOne({ _id: docWithId._id }, docWithId);
-    return { acknowledged: true, insertedId: docWithId._id };
-  }
-
   private checkClosure() {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
   }
@@ -145,25 +139,6 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     return Promise.resolve(docs);
   }
 
-  updateOne(filter: Record<string, any>, doc: Record<string, any>) {
-    this.checkClosure();
-    // Only support update by _id for now
-    const idx = this.documents.findIndex(d => d._id?.toString() === filter._id?.toString());
-    if (idx === -1) return { matchedCount: 0, modifiedCount: 0 };
-    this.documents[idx] = { ...doc } as WithId<T> & { [key: string]: any };
-    return { matchedCount: 1, modifiedCount: 1 };
-  }
-
-  async replaceOne(filter: Record<string, any>, doc: Record<string, any>, options?: { ifMatch?: string; ifNoneMatch?: string }) {
-    const idx = this.documents.findIndex(d => d._id === (filter._id ?? doc._id));
-    if (idx !== -1) {
-      this.documents[idx] = { ...doc } as WithId<T> & { [key: string]: any };
-    } else {
-      this.documents.push({ ...doc } as WithId<T> & { [key: string]: any });
-    }
-    return Promise.resolve();
-  }
-
   /**
    * Deletes a document by _id.
    * @param id Document _id
@@ -181,7 +156,7 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
    * @param id Document _id
    * @returns { doc, etag } or null if not found
    */
-  async loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null> {
+  private async loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null> {
     this.checkClosure();
     const doc = this.documents.find(d => d._id?.toString() === id?.toString());
     if (!doc) {
@@ -190,6 +165,19 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     // For memory store, generate a stable ETag based on JSON hash
     const etag = Buffer.from(JSON.stringify(doc)).toString('base64').substring(0, 32);
     return { doc: { ...doc }, etag };
+  }
+
+  /**
+   * Generic replaceOne - store implementation without conditional write semantics.
+   */
+  async replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void> {
+    this.checkClosure();
+    const idx = this.documents.findIndex(d => d._id === (filter._id ?? doc._id));
+    if (idx !== -1) {
+      this.documents[idx] = { ...doc } as WithId<T> & { [key: string]: any };
+    } else {
+      this.documents.push({ ...doc } as WithId<T> & { [key: string]: any });
+    }
   }
 
   async close() {
@@ -220,7 +208,7 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     return this.indexes.get(name);
   }
 
-  async replaceOneWithRetry(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void> {
+  async updateOne(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void> {
     const MAX_RETRIES = 3;
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -268,7 +256,7 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
     throw new MongoServerError(`Failed to update document after ${MAX_RETRIES} attempts`);
   }
 
-  async insertOneWithDuplicateCheck(id: any, doc: WithId<T>): Promise<void> {
+  async insertOne(id: any, doc: WithId<T>): Promise<void> {
     this.checkClosure();
     // Check if document with this _id already exists
     const existing = this.documents.find(d => d._id?.toString() === id?.toString());

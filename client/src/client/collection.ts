@@ -78,8 +78,8 @@ export class SengoCollection<T> {
       const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
       logger.debug('Inserting document', { doc: docWithId });
       
-      // Delegate to store for duplicate key checking
-      await this.store.insertOneWithDuplicateCheck(docWithId._id, docWithId as WithId<T>);
+      // Delegate to store for insertion with duplicate key checking
+      await this.store.insertOne(docWithId._id, docWithId as WithId<T>);
 
       const indexes = await this.store.getIndexes();
       const indexNames: string[] = [];
@@ -394,7 +394,7 @@ export class SengoCollection<T> {
 
       // Delegate retry logic to the store with filter validation (cast to match generic T)
       try {
-        await this.store.replaceOneWithRetry(doc._id, applyUpdate as any, validateFilter as any);
+        await this.store.updateOne(doc._id, applyUpdate as any, validateFilter as any);
       } catch (err: any) {
         // If filter stops matching after reload, treat as no match (matchedCount 0)
         if (err.message && err.message.includes('does not match filter after reload')) {

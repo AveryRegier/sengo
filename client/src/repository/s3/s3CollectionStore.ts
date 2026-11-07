@@ -112,33 +112,6 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     }
   }
 
-  async replaceOne(filter: Record<string, any>, doc: Record<string, any>, options?: { ifMatch?: string; ifNoneMatch?: string }) {
-    if (this.closed) throw new MongoClientClosedError('Store is closed');
-    this.ensureIndexesLoaded();
-    const _id = filter._id ?? doc._id;
-    if (!_id) throw new MongoInvalidArgumentError('replaceOne requires _id');
-    const key = this.id2key(_id);
-    const body = JSON.stringify(doc);
-    const args: any = {
-      Bucket: this.bucket,
-      Key: key,
-      Body: body,
-      ContentType: 'application/json',
-    };
-    
-    // Add conditional write headers if provided
-    if (options?.ifMatch) {
-      args.IfMatch = options.ifMatch;
-    }
-    if (options?.ifNoneMatch) {
-      args.IfNoneMatch = options.ifNoneMatch;
-    }
-    
-    getLogger().debug(`Replacing document in S3`, { command: "putObject", args });
-    await this.s3.send(new PutObjectCommand(args));
-    // No MongoDB-style response here; just return void
-  }
-
   /**
    * Deletes a document by _id from S3.
    * @param id Document _id
@@ -323,35 +296,6 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   }
 
   /**
-   * Fetch a document by ID and return it with its ETag for conditional writes.
-   */
-  async loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null> {
-    try {
-      const key = this.id2key(id);
-      const args = {
-        Bucket: this.bucket,
-        Key: key,
-      };
-      getLogger().debug(`Fetching document with ETag from S3`, { command: "getObject", args });
-      const result = await this.s3.send(new GetObjectCommand(args));
-      if (!result || !result.Body) return null;
-      const data = await getBodyAsString(result);
-      const doc = JSON.parse(data);
-      const etag = result.ETag || '';
-      return { doc, etag };
-    } catch (err: any) {
-      if (err.name === 'NoSuchKey') return null;
-      if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-        throw new MongoNetworkError(err.message || 'Network error');
-      }
-      if (typeof err === 'string') {
-        throw new MongoNetworkError(err);
-      }
-      throw err;
-    }
-  }
-
-  /**
    * Scan the S3 bucket for all objects in the collection and filter by query.
    * This is a fallback if no index is available or the query cannot be satisfied by an index.
    */
@@ -469,7 +413,73 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     return this.loadedIndexes.get(name);
   }
 
-  async replaceOneWithRetry(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void> {
+  /**
+   * Store implementation of generic replaceOne interface (no conditional options).
+   * S3-specific version will be private.
+   */
+  async replaceOne(filter: Record<string, any>, doc: Record<string, any>): Promise<void> {
+    if (this.closed) throw new MongoClientClosedError('Store is closed');
+    return this.replaceOneInternal(filter, doc);
+  }
+
+  /**
+   * Internal S3-specific replaceOne with conditional write options.
+   */
+  private async replaceOneInternal(filter: Record<string, any>, doc: Record<string, any>, options?: { ifMatch?: string; ifNoneMatch?: string }): Promise<void> {
+    const id = filter._id ?? doc._id;
+    const key = this.id2key(id);
+    const body = JSON.stringify(doc);
+
+    try {
+      const args = {
+        Bucket: this.bucket,
+        Key: key,
+        Body: body,
+        ContentType: 'application/json',
+        ...(options?.ifMatch && { IfMatch: options.ifMatch }),
+        ...(options?.ifNoneMatch && { IfNoneMatch: options.ifNoneMatch }),
+      };
+
+      getLogger().debug(`Putting object to S3`, { command: "putObject", args: { Bucket: args.Bucket, Key: args.Key, Body: args.Body, ContentType: args.ContentType, IfMatch: args.IfMatch, IfNoneMatch: args.IfNoneMatch } });
+      await this.s3.send(new PutObjectCommand(args));
+    } catch (err: any) {
+      if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
+        throw new MongoNetworkError(err.message || 'Network error');
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Load a document by _id with ETag for conditional writes (S3-specific).
+   */
+  private async loadRecordWithETag(id: any): Promise<{ doc: WithId<T>; etag: string } | null> {
+    try {
+      const key = this.id2key(id);
+      const args = {
+        Bucket: this.bucket,
+        Key: key,
+      };
+      getLogger().debug(`Fetching document with ETag from S3`, { command: "getObject", args });
+      const result = await this.s3.send(new GetObjectCommand(args));
+      if (!result || !result.Body) return null;
+      const data = await getBodyAsString(result);
+      const doc = JSON.parse(data);
+      const etag = result.ETag || '';
+      return { doc, etag };
+    } catch (err: any) {
+      if (err.name === 'NoSuchKey') return null;
+      if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
+        throw new MongoNetworkError(err.message || 'Network error');
+      }
+      if (typeof err === 'string') {
+        throw new MongoNetworkError(err);
+      }
+      throw err;
+    }
+  }
+
+  async updateOne(id: any, applyUpdate: (current: WithId<T>) => WithId<T>, validateFilter?: (doc: WithId<T>) => boolean): Promise<void> {
     const MAX_RETRIES = 3;
     const logger = getLogger();
 
@@ -490,7 +500,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
       try {
         logger.debug('Updating document with ETag condition', { _id: id, etag, attempt });
-        await this.replaceOne({ _id: updatedDoc._id }, updatedDoc, { ifMatch: etag });
+        await this.replaceOneInternal({ _id: updatedDoc._id }, updatedDoc, { ifMatch: etag });
         return; // Success
       } catch (err: any) {
         if (err.$metadata?.httpStatusCode === 412 || err.name === 'PreconditionFailedError') {
@@ -510,12 +520,12 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     throw new PreconditionFailedError(`Failed to update document after ${MAX_RETRIES} attempts`);
   }
 
-  async insertOneWithDuplicateCheck(id: any, doc: WithId<T>): Promise<void> {
+  async insertOne(id: any, doc: WithId<T>): Promise<void> {
     const logger = getLogger();
     try {
       logger.debug('Inserting document with duplicate check', { _id: id });
       // Use IfNoneMatch: '*' to ensure the document doesn't already exist
-      await this.replaceOne({ _id: id }, doc, { ifNoneMatch: '*' });
+      await this.replaceOneInternal({ _id: id }, doc, { ifNoneMatch: '*' });
     } catch (err: any) {
       // Handle S3 412 (PreconditionFailed) as DuplicateKeyError
       if (err.$metadata?.httpStatusCode === 412 || err.name === 'PreconditionFailed') {
