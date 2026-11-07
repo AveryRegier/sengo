@@ -1,139 +1,141 @@
-# Sengo S3 Index Design
+# Sengo Index Design
 
-## Use Case and Motivation
-Sengo is designed for small, cost-sensitive applications—such as volunteer organizations or event-driven apps—that use AWS S3 for document storage. These applications require a simple, reliable way to store and retrieve documents without the cost or operational complexity of running a database server. However, as collections grow, searching by loading every document from S3 becomes impractical and expensive.
+Sengo stores documents and index data as separate JSON objects in S3. Indexes have two jobs:
 
-## Technology Choices: MongoDB Compatibility and S3
-Sengo provides a MongoDB-like API for document operations, making it familiar to developers. Instead of using a database server, Sengo stores each document as a separate JSON file in S3. To support efficient queries, Sengo implements its own indexing system, inspired by MongoDB, but tailored for S3’s object storage model.
+1. Find candidate document IDs without scanning every document.
+2. For compound indexes, preserve ordering/filter values for the final index field so supported sort, range, and limit queries can fetch fewer documents.
 
-## The Need for Indexes
-Without indexes, every query would require listing and loading all documents in a collection from S3—a slow and costly operation. **The primary goal of indexes is to avoid document fetches during query time, which is the most expensive part of any query.** Indexes allow Sengo to quickly find the IDs of documents matching a query, so only the relevant documents are loaded from S3.
+The index key definition is ordered. Every declared field participates in the logical index key. Sengo's current S3 layout groups entries by the leading fields and stores the final field's value beside each document ID. This is a storage/query optimization, not a change to which fields define the index.
 
-## S3 Index and Document File Layout
-Sengo stores both documents and index entries as individual JSON files in S3, organized by collection:
+## Shared behavior and layout
 
-### Document Storage
-- **Path:** `collection/data/<_id>.json`
-- **Contents:** The full JSON document, including its `_id` field.
-- **Note:** The `_id` field is naturally indexed in S3 through the file path itself, so no separate index is needed for `_id` lookups.
+### Documents
 
-**Example:**
-- Path: `pets/data/64a1f2c3e4b5d6789a0b1c2d.json`
-- Contents:
+- Path: `collection/data/<_id>.json`
+- Contents: The full document, including `_id`.
+- `_id` lookups use this path directly.
+
+### Index metadata
+
+- Path: `collection/indices/<indexName>.json`
+- Contents: index name, ordered key fields, and index options such as `unique`.
+- Metadata without a `unique` property is a non-unique index.
+
+Example:
+
 ```json
 {
-  "_id": "64a1f2c3e4b5d6789a0b1c2d",
-  "name": "Milo"
+  "name": "category_1_priority_1",
+  "keys": [
+    { "field": "category", "order": 1 },
+    { "field": "priority", "order": 1 }
+  ]
 }
 ```
 
-### Index Metadata
-- **Path:** `collection/indices/<indexName>.json`
-- **Contents:** JSON describing the index definition (fields, order, etc).
+### Index entry objects
 
-**Example:**
-- Path: `pets/indices/name_1.json`
-- Contents:
+- Path: `collection/indices/<indexName>/<entryKey>.json`
+- A single-field index uses the field value as `entryKey`.
+- A compound index uses the values of all leading (non-final) fields, joined by `|` after URI encoding.
+- The final declared field is stored with each ID in the entry data. It remains part of the logical compound key and provides ordering/filter data.
+
+For example, index `{ category: 1, priority: 1 }` puts all documents with `category: "work"` in:
+
+`tasks/indices/category_1_priority_1/work.json`
+
+Its serialized entries retain `priority`:
+
 ```json
-{
-  "name": "name_1",
-  "keys": [{ "field": "name", "order": 1 }]
-}
+[["task-a", 1], ["task-b", 2], ["task-c", 4]]
 ```
 
-### Index Entry Files
-- **Path:** `collection/indices/<indexName>/<key>.json`
-  - `<key>` is the encoded value(s) of the indexed field(s). For single-field indexes, this is the field value. For compound indexes, values are joined by `|` and each value is URI-encoded.
-- **Contents:** JSON array of document IDs (`_id`s) that have the indexed value(s).
-- **Purpose:** Index documents are simply lists of `_id` values. This allows queries to identify matching documents without fetching them from S3, significantly reducing query costs.
+The file is grouped by `category`; the tuples represented inside it are `(category, priority)`. The final field is not omitted from the index. It is omitted only from the S3 object path.
 
-**Examples:**
-- Path: `pets/indices/name_1/Milo.json`
-- Contents:
+For `{ category: 1, status: 1, priority: 1 }`, the entry path is grouped by `category` and `status`, for example `work|active.json`; each ID in that entry carries its `priority`.
+
+### Queries and sorting
+
+For `{ category: 1, priority: 1 }`:
+
+- `find({ category: "work" })` can read the grouped entry and return all its IDs.
+- `find({ category: "work", priority: 2 })` can read the same entry and filter by the stored final-field value before loading documents.
+- `find({ category: "work" }).sort({ priority: 1 }).limit(2)` can use the entry's ordering to fetch only the first two matching documents.
+
+The final field is therefore useful even when it is also part of a unique index. Sorting is not needed to establish uniqueness. An exact lookup by all compound fields identifies at most one matching tuple under a unique constraint; the stored final-field value simply lets that lookup distinguish tuples sharing a leading-field entry.
+
+Index ordering matters for sort optimization: the final field determines the order within a grouped entry. It does not mean that only the leading fields are indexed logically.
+
+## Non-unique indexes
+
+Non-unique indexes preserve the existing one-to-many behavior:
+
+- Multiple documents may have the same single-field value.
+- Multiple documents may have the same complete compound tuple.
+- Each entry stores every matching `_id`. Compound entries also store the final field value per ID to support ordering and filtering.
+
+Example, non-unique `{ category: 1, priority: 1 }`:
+
 ```json
-["64a1f2c3e4b5d6789a0b1c2d", "64a1f2c3e4b5d6789a0b1c2e"]
+[["task-a", 2], ["task-b", 2]]
 ```
-- Path: `pets/indices/name_1/Bella.json`
-- Contents:
+
+Both documents have the same full tuple `("work", 2)` and both IDs remain in the grouped `work.json` entry. Ordinary index maintenance must not reject duplicate values.
+
+## Unique indexes
+
+A unique index constrains the complete logical key:
+
+- Unique `{ email: 1 }`: no two documents may have the same `email`.
+- Unique `{ category: 1, priority: 1 }`: no two documents may have the same `(category, priority)` pair.
+
+For a unique compound index, the S3 entry file is still grouped by leading fields and may contain several IDs with different final-field values. It must not contain two different IDs with the same complete tuple.
+
+Example, unique `{ category: 1, priority: 1 }`:
+
 ```json
-["64a1f2c3e4b5d6789a0b1c2f", "64a1f2c3e4b5d6789a0b1c30"]
-```
-- Path: `tasks/indices/category_1_priority_1/work.json` (for a compound index on `{ category: 1, priority: 1 }`)
-- Contents (IDs sorted by priority):
-```json
-["task1_id", "task2_id", "task3_id"]
+[["task-a", 1], ["task-b", 2]]
 ```
 
-## Index Design: Single-Key vs Compound Indexes
+Both entries share `category: "work"` but have distinct complete keys. A second document with `("work", 2)` must be rejected, while one with `("work", 3)` is allowed. The final field is part of the uniqueness comparison, not an extra value outside the index definition.
 
-### Single-Key Indexes
-For single-key indexes (e.g., `{ name: 1 }`), the index structure is straightforward:
-- **Index Key:** The value of the indexed field (e.g., `Milo`)
-- **Index Entry:** A JSON array containing all `_id` values for documents with that field value
-- The index entry is simply a flat list of document IDs, allowing quick lookup without fetching documents
+For a unique single-field index, the indexed value identifies the entry, and at most one document ID may own that value.
 
-### Compound Indexes
-For compound indexes (e.g., `{ category: 1, priority: 1 }`), the design is more sophisticated:
-- **Index Key:** All but the last indexed field values become part of the S3 key, joined by `|` (e.g., `work` for category="work" in a 2-field index)
-- **Index Entry:** A JSON array of `_id` values, **ordered by the final indexed field's value**
-- The final field in the index determines the **sort order** of the IDs within the index entry, but is NOT part of the S3 key
-- This structure enables efficient range queries and sorting on the final field without loading documents
+### Concurrent writers
 
-**Example 1:** For 2-field index `{ category: 1, priority: 1 }`:
-- Index key: `work` (only category, the non-final field)
-- Index entry file: `collection/indices/category_1_priority_1/work.json`
-- Index entry contents: `["id3", "id1", "id2"]` (IDs sorted by priority: 1, 2, 3)
-- This single file contains ALL documents with category="work", sorted by priority
-- Enables efficient `find({ category: "work" }).sort({ priority: 1 }).limit(5)` by reading just the index file and fetching only 5 documents
+Sengo clients may run in separate Lambda processes with separate memory and caches. S3 is the shared authority; local cached index entries cannot decide uniqueness.
 
-**Example 2:** For 3-field index `{ category: 1, status: 1, priority: 1 }`:
-- Index key: `work|active` (category and status, joined by `|`)
-- Index entry file: `collection/indices/category_1_status_1_priority_1/work|active.json`
-- Index entry contents: IDs for category="work" AND status="active", sorted by priority
-- The pattern: all non-final fields form the key, final field determines internal sort order
+Updating a shared entry must use conditional S3 writes:
 
-### How Indexes Are Used for Efficient Query Lookup
+1. Load the entry and its ETag (or observe that the object does not exist).
+2. Apply the local addition/removal to the loaded entry.
+3. Write with `IfMatch` for an existing ETag, or `IfNoneMatch: '*'` when creating a missing entry.
+4. On a conditional-write conflict, reload the current entry and reapply the local delta.
+5. After reload, report a duplicate only if another `_id` owns the same complete logical key. An ETag conflict by itself is not a duplicate: a concurrent writer may have added a different final-field value to the same grouped entry.
 
-When a query is issued (e.g., `find({ name: "Milo" })`), Sengo inspects all loaded index definitions for the collection and selects the best matching index. If an index exists on the queried field(s), the following process is used:
+This prevents two processes from silently overwriting each other's changes to one index-entry object. S3 does not provide a transaction spanning an index entry and its document object. Failure recovery for partial document/index updates must therefore be specified separately.
 
-1. **Index Key Generation:**
-   - The query values for the indexed fields are encoded to form the index key (e.g., for `{ name: "Milo" }`, the key is `Milo`).
-2. **Index Entry Lookup:**
-   - Sengo loads the corresponding index entry file from S3 (e.g., `pets/indices/name_1/Milo.json`).
-   - This file contains a flat array of document IDs (`_id`s) for all documents with that indexed value.
-   - **This is where the performance optimization happens: we get a list of matching document IDs without fetching any documents.**
-3. **Document Fetch:**
-   - For each ID in the array, Sengo loads the document from S3 (e.g., `pets/data/<_id>.json`).
-   - Only the documents matching the query are returned (if the index is compound, all indexed fields must match).
+Unique-index creation over existing data is also a separate operation: the implementation must prevent concurrent writes from bypassing the index while it is being validated and built. Per-entry conditional writes protect competing entry updates but alone do not make index backfill atomic.
 
-**Example:**
-- Query: `find({ name: "Milo" })`
-- Index used: `name_1` (on `{ name: 1 }`)
-- Sengo loads `pets/indices/name_1/Milo.json` → `["64a1f2c3e4b5d6789a0b1c2d", "64a1f2c3e4b5d6789a0b1c2e"]`
-- Loads `pets/data/64a1f2c3e4b5d6789a0b1c2d.json` and `pets/data/64a1f2c3e4b5d6789a0b1c2e.json`
-- Returns all documents with `name: "Milo"`
+The exact missing/null behavior and array-valued index-field behavior must be documented and tested before claiming MongoDB compatibility. Sparse and partial unique indexes are out of scope unless explicitly added.
 
-This approach avoids scanning all documents in the collection, making lookups by indexed fields efficient even for large datasets. For compound indexes, the key is constructed from all indexed fields present in the query, and only exact matches on the leading fields are supported.
+## Query performance
 
-### Using Indexes to Optimize $limit and $sort
+The primary performance goal is minimizing document fetches from S3:
 
-Indexes enable efficient `$limit` and `$sort` operations by limiting the number of document fetches:
+1. Select an index that can provide candidate IDs.
+2. Load relevant index entries.
+3. Apply available final-field filtering/order and limit within entry data.
+4. Fetch candidate documents and apply remaining query semantics.
 
-**With $limit:**
-- When the index's sort order matches the query's `$sort` direction, only the first N documents need to be fetched
-- Example: `find({ category: "work" }).sort({ priority: 1 }).limit(5)` with index `{ category: 1, priority: 1 }` only fetches 5 documents
-- The index entry already contains IDs in priority order, so Sengo can fetch exactly 5 documents and stop
+For example, `{ category: 1, priority: 1 }` can support `find({ category: "work" }).sort({ priority: 1 }).limit(2)` because the entry is ordered by `priority`. Exact unique tuple lookup does not need sorting, but benefits from final-field filtering before document fetch.
 
-**With $sort:**
-- For compound indexes, if the query's sort field matches the final indexed field, documents can be returned in sorted order
-- This eliminates the need to fetch all documents, sort them in memory, and then apply the limit
-- The sort order is determined by the final field in the compound index
+Explain output and tests should distinguish index entries read from document objects fetched. S3 simulator assertions should verify both correctness and the number of document fetches.
 
-**Key Benefit:** By avoiding unnecessary document fetches (the most expensive operation), indexes with proper sort ordering dramatically reduce S3 API calls and query costs.
+## Compatibility and operational limits
 
-### Notes
-- All index entry files are stored as flat arrays of string IDs.
-- Index entry files are created, updated, and deleted as documents are inserted, updated, or deleted.
-- The S3 layout is designed for efficient lookup and minimal cost, with each index entry and document as a separate S3 object.
-
----
+- Non-unique indexes remain one-to-many.
+- Unique constraints apply to complete index keys, not only S3 path prefixes.
+- S3 object writes are conditional per object; no multi-object transaction is implied.
+- Cross-process correctness must be tested with independent store/client instances sharing one S3 simulator.
+- Index metadata and index entries are separate objects. Publishing a unique index while other clients write requires an explicit build/write-coordination protocol.
