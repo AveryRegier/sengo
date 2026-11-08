@@ -271,6 +271,15 @@ key is confirmed absent; when verification is inconclusive, retain claims to
 avoid admitting a duplicate and report the unknown outcome. Never list or scan
 the collection to recover a write.
 
+An inconclusive insert outcome is deliberately conservative, but can leave a
+stale S3 unique claim if the document was not stored. Claims do not expire when
+a process or Lambda invocation ends, and Sengo does not automatically rebuild
+or expire them. Applications should treat `MongoWriteOutcomeUnknownError` as
+an unknown result and avoid retrying the same unique value under a different
+`_id` as though the first insert definitely failed. Operational repair of a
+stale claim is currently manual; do not remove an entry membership until the
+corresponding document state has been checked.
+
 For a failed compensation or post-delete release, track the specific owner and
 entry as suspect in the store. A normal duplicate check trusts the exact index
 entry and must not fetch the owner document. Only if the requested tuple
@@ -449,7 +458,7 @@ already-built index.
 - **Given** a document owning a unique tuple, **when** it is deleted, **then** that tuple becomes reusable; cleanup never removes a tuple now owned by another document.
 - **Given** duplicate existing documents, **when** unique index creation/backfill runs, **then** it fails with `DuplicateKeyError`, preserves documents, and leaves no active invalid unique index.
 - **Given** unique-index backfill racing a write from another Lambda, **when** both overlap, **then** the build protocol prevents a duplicate from slipping past validation/publication.
-- **Given** a known document-write failure after index changes begin, **when** the operation fails, **then** compensation/recovery leaves no false unique ownership. For an ambiguous S3 response, verify the exact document key; release claims only when absence is confirmed, otherwise retain claims and report an unknown outcome.
+- **Given** a known document-write failure after index changes begin, **when** the operation fails, **then** compensation/recovery leaves no false unique ownership. For an ambiguous S3 response, verify the exact document key; release claims only when absence is confirmed, otherwise retain claims and report an unknown outcome. Such claims persist in S3 and require manual repair if they are stale.
 - **Given** a non-unique index, **when** duplicate values are inserted across processes, **then** all IDs remain in the index entry.
 - **Given** a unique compound index and a query matching leading and final fields, **when** `find` executes, **then** final-field data filters candidates before document fetch.
 - **Given** a unique compound index and a prefix query sorted by the final field, **when** a limited find executes, **then** existing sort/limit optimization remains available.

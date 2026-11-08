@@ -65,6 +65,12 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
   - array key specs, e.g. `[{ name: 1 }, { age: -1 }]`
   - optional `{ unique: true }` for unique single-field or compound indexes
 
+For unique-index behavior and operational limits, consult
+[Supported Index Features](./references/SUPPORTED-INDEX-FEATURES.md). In
+particular, treat `MongoWriteOutcomeUnknownError` as an unresolved insert, not
+a confirmed failure: Sengo retains the unique claim if the exact document
+write cannot be verified, and that S3 claim does not expire automatically.
+
 ## Rules to Produce Working Output
 1. Always start with `const collection = client.db(...).collection<...>(...)`.
 2. Default to `client.db('s3')` unless the user explicitly asks for a different backend.

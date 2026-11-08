@@ -27,6 +27,13 @@ Accepted key order values: `1`, `-1`, `text`.
 - Independent array expansion in a compound index is rejected.
 - Independent clients sharing S3 enforce uniqueness for writes against an
   index whose metadata they have loaded.
+- On a document PUT timeout, Sengo checks only that document's S3 key. If the
+  document is present or the check is inconclusive, the insert throws
+  `MongoWriteOutcomeUnknownError` and retains its unique claim. Claims are
+  durable S3 objects; they do not expire when a Lambda ends and are not
+  automatically rebuilt. Do not treat this error as a confirmed failure or
+  blindly retry the same unique value under a new `_id`; a stale claim can
+  block the value until manually repaired.
 - Unique-index creation over existing data is not online-safe. Pause writes
   during the build and restart/recreate application clients afterward because
   each store caches index metadata and does not refresh it automatically. A

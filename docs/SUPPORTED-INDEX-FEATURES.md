@@ -50,6 +50,17 @@ Accepted order values in index definitions include `1`, `-1`, and `text` by type
   lookups compared with equivalent non-unique index reads.
 - Writes from independent clients sharing S3 are covered by race tests when
   each client has loaded the unique index metadata.
+- If an insert's document PUT times out, Sengo checks that exact document key.
+  If the matching document is present or the verification read also fails,
+  Sengo throws `MongoWriteOutcomeUnknownError` and keeps the unique claim to
+  prevent a competing insert from creating a duplicate. Handle this as an
+  unknown result, not a confirmed failure; blindly retrying with a different
+  `_id` and the same unique value will be rejected.
+- These claims are stored in S3 and do not expire when a Lambda invocation
+  ends. If verification was inconclusive and the document was not actually
+  stored, the claim can continue to block that unique value until it is
+  explicitly repaired. Sengo currently does not automatically expire or
+  rebuild such claims.
 - Creating a unique index over existing documents is not an online operation.
   Pause writes during index creation, then restart or recreate application
   clients before writes resume. Each store caches index metadata when first

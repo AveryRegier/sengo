@@ -226,6 +226,13 @@ before resuming writes. Stores cache index metadata and do not automatically
 discover an index created later by a separate admin client. See
 [docs/SUPPORTED-INDEX-FEATURES.md](docs/SUPPORTED-INDEX-FEATURES.md) for details.
 
+If a document PUT times out, Sengo checks only that document's S3 key. When
+the result remains uncertain, it throws `MongoWriteOutcomeUnknownError` and
+retains the unique claim to avoid allowing a duplicate. Claims are durable S3
+objects: they do not expire when a Lambda invocation ends, and stale claims
+are not automatically repaired. Treat this as an unresolved result rather
+than a confirmed failure.
+
 ### Generic Index Example
 
 ```ts
