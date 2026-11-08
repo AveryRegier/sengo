@@ -9,7 +9,7 @@ This reference is scoped to code generation for Sengo client users.
 - `collection.insertOne(doc)`
 - `collection.find(query, options?)`
 - `collection.findOne(query, options?)`
-- `collection.updateOne(filter, update)`
+- `collection.updateOne(filter, update, options?)`
 - `collection.deleteOne(filter)`
 - `collection.createIndex(keys)`
 - `collection.dropIndex(name)`
@@ -25,6 +25,7 @@ This reference is scoped to code generation for Sengo client users.
 ## Supported Update Operators
 
 - `$set`
+- `$setOnInsert` (applied only when `options.upsert` inserts a document)
 
 ## Supported Options
 
@@ -34,6 +35,9 @@ This reference is scoped to code generation for Sengo client users.
 - `findOne(query, options?)`
   - `options.sort`
   - `options.limit` accepted, but effective limit is always 1.
+- `updateOne(filter, update, options?)`
+  - `options.upsert`
+  - `options.explain`
 
 ## Important Notes
 

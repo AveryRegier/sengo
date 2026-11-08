@@ -34,7 +34,7 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
 - `collection.find(query, options?)`
 - `collection.findOne(query, options?)`
 - `collection.countDocuments(filter?, options?)`
-- `collection.updateOne(filter, update)`
+- `collection.updateOne(filter, update, options?)`
 - `collection.deleteOne(filter)`
 - `collection.createIndex(keys)`
 - `collection.dropIndex(name)`
@@ -57,8 +57,10 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
   - `options.skip`
   - `options.limit`
   - `options.explain`
-- `updateOne(filter, update)`
-  - update document must use supported update operator(s): `$set`
+- `updateOne(filter, update, options?)`
+  - update document supports `$set` and `$setOnInsert`
+  - `options.upsert` inserts when no document matches
+  - `options.explain` reports write costs
 - `createIndex(keys)`
   - `string` key name
   - object key spec, e.g. `{ name: 1 }`
@@ -161,6 +163,18 @@ const pagedCount = await collection.countDocuments(
 const updateResult = await collection.updateOne(
   { _id: 'abc123' },
   { $set: { status: 'completed', updatedAt: new Date().toISOString() } }
+);
+```
+
+### UpdateOne with upsert
+```ts
+const updateResult = await collection.updateOne(
+  { calendarId: 'event-1', memberId: 'member-1' },
+  {
+    $set: { isAvailable: true },
+    $setOnInsert: { createdAt: new Date().toISOString() }
+  },
+  { upsert: true }
 );
 ```
 

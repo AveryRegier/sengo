@@ -92,15 +92,19 @@ This section lists options supported by each client command, including commands 
     - filter/default count behavior in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L24)
     - skip/limit options in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L61)
     - explain mode in [client/tests/client/countDocuments.test.ts](../client/tests/client/countDocuments.test.ts#L83)
-- SengoCollection.updateOne(filter, update)
+- SengoCollection.updateOne(filter, update, options?)
   - Supported options/args:
     - filter required
     - update required
-    - supported update operator: $set
+    - supported update operators: $set and $setOnInsert
+    - options.upsert inserts a document when no document matches
+    - options.explain supports queryPlanner, executionStats, and allPlansExecution
   - Implementation:
-    - method in [client/src/client/collection.ts](../client/src/client/collection.ts#L95)
-    - $set branch in [client/src/client/collection.ts](../client/src/client/collection.ts#L106)
-  - Test: updateOne by _id in [client/tests/client/updateOne-byId.test.ts](../client/tests/client/updateOne-byId.test.ts#L16)
+    - method in [client/src/client/collection.ts](../client/src/client/collection.ts#L409)
+    - upsert option in [client/src/client/collection.ts](../client/src/client/collection.ts#L457)
+  - Tests:
+    - updateOne by _id in [client/tests/client/updateOne-byId.test.ts](../client/tests/client/updateOne-byId.test.ts#L16)
+    - upsert and $setOnInsert in [client/tests/sengo-test-future-phases/upsert.test.ts](../client/tests/sengo-test-future-phases/upsert.test.ts#L1)
 - SengoCollection.deleteOne(filter)
   - Supported options/args: required filter only
   - Implementation: [client/src/client/collection.ts](../client/src/client/collection.ts#L129)

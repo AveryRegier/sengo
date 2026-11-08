@@ -72,6 +72,7 @@ Allowed query operators:
 Allowed update operators:
 
 - `$set`
+- `$setOnInsert` when `updateOne` uses `{ upsert: true }`
 
 Unsupported operators/features must never be presented as supported. Explain should report them explicitly as unimplemented.
 

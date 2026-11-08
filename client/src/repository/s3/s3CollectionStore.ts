@@ -618,12 +618,17 @@ function combineOrConditions(query: Record<string, any>) {
       // replace with reduce so we can handle combining property values
       queryForIndex = queryForIndex.$or.reduce((acc, curr) => {
         Object.keys(curr).forEach(key => {
-          if (acc[key] === undefined) {
+          const currentValue = acc[key];
+          if (currentValue === undefined) {
             acc[key] = curr[key];
-          } else if (acc[key].$in) {
-            acc[key].$in.push(curr[key]);
+          } else if (
+            currentValue !== null &&
+            typeof currentValue === 'object' &&
+            Array.isArray(currentValue.$in)
+          ) {
+            currentValue.$in.push(curr[key]);
           } else {
-            acc[key] = { $in: [acc[key], curr[key]] };
+            acc[key] = { $in: [currentValue, curr[key]] };
           }
         });
         return acc;
