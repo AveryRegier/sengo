@@ -508,7 +508,7 @@ describe('unique indexes', () => {
     await secondStore.close();
   });
 
-  it.fails('RECOVERY GAP: returns a duplicate-key error after stale unique-entry contention', async () => {
+  it('revalidates stale unique-entry contention and returns a duplicate-key error', async () => {
     const shared = makeSharedS3Collections('unique-stale-race');
     await shared.collections[0].createIndex({ email: 1 }, { unique: true });
     await shared.loadIndexesOnBothClients();
@@ -535,6 +535,13 @@ describe('unique indexes', () => {
     expect(writes.find(write => write.status === 'rejected')).toMatchObject({
       reason: { name: 'DuplicateKeyError', code: 11000 },
     });
+    await expect(shared.collections[1].insertOne({
+      _id: 'stale-retry',
+      tenant: 'tenant-retry',
+      handle: 'handle-retry',
+      email: 'different@example.test',
+    })).resolves.toMatchObject({ insertedId: 'stale-retry' });
+    shared.expectNoCollectionScan();
   });
 
   it('rejects concurrent duplicate full compound keys sharing one entry', async () => {

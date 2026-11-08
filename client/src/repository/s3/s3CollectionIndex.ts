@@ -1,7 +1,7 @@
 import { S3Client, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { Readable } from 'stream';
 import { BaseCollectionIndex, IndexEntry, IndexEntryMutation, IndexOptions } from '../collectionIndex';
-import { MongoNetworkError, MongoServerError } from '../../errors.js';
+import { DuplicateKeyError, MongoNetworkError, MongoServerError } from '../../errors.js';
 import { ExplainSink, getLogger } from '../../index';
 
 /**
@@ -140,14 +140,22 @@ export class S3CollectionIndex extends BaseCollectionIndex {
         throw new MongoServerError(`S3 did not return an ETag for existing index entry ${s3Key}`);
       }
       const fresh = this.createEntry(current.data);
-      for (const mutation of mutations) {
-        if (mutation.kind === 'add') {
-          fresh.add(mutation.id, mutation.sortValue);
-        } else if (mutation.kind === 'remove') {
-          fresh.remove(mutation.id);
-        } else {
-          fresh.removeMembership(mutation.id, mutation.sortValue);
+      try {
+        for (const mutation of mutations) {
+          if (mutation.kind === 'add') {
+            fresh.add(mutation.id, mutation.sortValue);
+          } else if (mutation.kind === 'remove') {
+            fresh.remove(mutation.id);
+          } else {
+            fresh.removeMembership(mutation.id, mutation.sortValue);
+          }
         }
+      } catch (error) {
+        if (error instanceof DuplicateKeyError) {
+          entry.replaceCommitted(current.data, acknowledgedThrough);
+          this.entryStates.set(key, { exists: current.exists, etag: current.etag });
+        }
+        throw error;
       }
 
       const body = mutations.length === 0 ? entry.serialize() : fresh.serialize();

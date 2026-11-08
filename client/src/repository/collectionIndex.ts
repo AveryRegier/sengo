@@ -533,7 +533,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
             },
           );
         } catch (error) {
-          if (changed) attempted.push(membership);
+          if (changed && !(error instanceof DuplicateKeyError)) attempted.push(membership);
           throw error;
         }
         if (changed) attempted.push(membership);
