@@ -94,6 +94,11 @@ function makeSharedS3Collections(name: string) {
         });
       };
     },
+    expectNoCollectionScan() {
+      expect(sends.flatMap(send => send.mock.calls).some(([command]) =>
+        command.constructor.name === 'ListObjectsV2Command',
+      )).toBe(false);
+    },
   };
 }
 
@@ -550,6 +555,7 @@ describe('unique indexes', () => {
 
     expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(1);
     expect(writes.filter(write => write.status === 'rejected')).toHaveLength(1);
+    shared.expectNoCollectionScan();
     expect((await shared.collections[0].find({ tenant: 'north', handle: 'same' }).toArray())).toHaveLength(1);
   });
 
@@ -569,6 +575,7 @@ describe('unique indexes', () => {
     ));
     releaseReads();
 
+    expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(2);
     expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(2);
     expect(await shared.collections[0].find({ tenant: 'north' }).toArray()).toHaveLength(2);
   });
@@ -618,6 +625,7 @@ describe('unique indexes', () => {
 
     expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(1);
     expect(writes.filter(write => write.status === 'rejected')).toHaveLength(1);
+    shared.expectNoCollectionScan();
     const first = await shared.collections[0].find({ email: 'first@example.test' }).toArray();
     const second = await shared.collections[0].find({ email: 'second@example.test' }).toArray();
     expect(first.length + second.length).toBe(1);
@@ -647,6 +655,7 @@ describe('unique indexes', () => {
     ]);
     releaseReads();
     expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(1);
+    shared.expectNoCollectionScan();
     const loserIndex = writes[0].status === 'rejected' ? 0 : 1;
     const loserEmail = loserIndex === 0 ? 'first@example.test' : 'second@example.test';
 
@@ -684,6 +693,7 @@ describe('unique indexes', () => {
 
     expect(updates.filter(update => update.status === 'fulfilled')).toHaveLength(1);
     expect(updates.filter(update => update.status === 'rejected')).toHaveLength(1);
+    shared.expectNoCollectionScan();
     expect(await shared.collections[0].find({ email: 'shared@example.test' }).toArray()).toHaveLength(1);
     const first = await shared.collections[0].findOne({ _id: 'update-first' });
     const second = await shared.collections[0].findOne({ _id: 'update-second' });
@@ -712,6 +722,7 @@ describe('unique indexes', () => {
     ]);
 
     expect(deletion.status).toBe('fulfilled');
+    shared.expectNoCollectionScan();
     const matches = await shared.collections[0].find({ email: 'reusable@example.test' }).toArray();
     if (insertion.status === 'fulfilled') {
       expect(matches).toMatchObject([{ _id: 'replacement' }]);
@@ -774,6 +785,8 @@ describe('unique indexes', () => {
   it('releases a claimed key when a definite document write failure occurs', async () => {
     const { collection, simulator, send } = makeS3Collection('unique-definite-write-failure');
     await collection.createIndex({ email: 1 }, { unique: true });
+    send.mockClear();
+    simulator.clearLogs();
     let failDocumentWrite = true;
     send.mockImplementation(async (command: any) => {
       if (
@@ -800,6 +813,9 @@ describe('unique indexes', () => {
       handle: 'retry',
       email: 'retry@example.test',
     })).resolves.toMatchObject({ insertedId: 'retry' });
+    expect(send.mock.calls.some(([command]) =>
+      command.constructor.name === 'ListObjectsV2Command',
+    )).toBe(false);
     expect(simulator.getFile('unique-definite-write-failure/data/failed.json')).toBeUndefined();
   });
 
