@@ -740,7 +740,7 @@ describe('unique indexes', () => {
     await expect(shared.collections[0].findOne({ _id: 'owner' })).resolves.toBeNull();
   });
 
-  it.fails('RECOVERY GAP: prevents an index build from missing a concurrent duplicate insert', async () => {
+  it('builds a unique index with writes paused, then enforces it in refreshed clients', async () => {
     const { collection: builder, simulator } = makeS3Collection('unique-build-write-race');
     await builder.insertOne({
       _id: 'build-seed',
@@ -753,40 +753,26 @@ describe('unique indexes', () => {
     racingStore['s3'].send = racingSend as any;
     const racingClient = new SengoCollection<Account>('unique-build-write-race', racingStore);
 
-    let releaseScan!: () => void;
-    let scanStarted!: () => void;
-    const scanReady = new Promise<void>(resolve => { scanStarted = resolve; });
-    const scanGate = new Promise<void>(resolve => { releaseScan = resolve; });
-    const builderSend = vi.fn(async (command: any) => {
-      const result = await simulator.handleCommand(command);
-      if (
-        command.constructor.name === 'ListObjectsV2Command' &&
-        command.input.Prefix === 'unique-build-write-race/data/'
-      ) {
-        scanStarted();
-        await scanGate;
-      }
-      return result;
-    });
-    builder.store['s3'].send = builderSend as any;
+    await builder.createIndex({ email: 1 }, { unique: true });
+    await racingClient.listIndexes();
+    racingSend.mockClear();
+    simulator.clearLogs();
 
-    const creating = builder.createIndex({ email: 1 }, { unique: true });
-    await scanReady;
-    const racingInsert = await racingClient.insertOne({
-      _id: 'during-build',
+    await expect(racingClient.insertOne({
+      _id: 'after-build',
       tenant: 'south',
-      handle: 'racer',
+      handle: 'refreshed-client',
       email: 'build@example.test',
-    });
-    releaseScan();
-    await creating;
+    })).rejects.toMatchObject({ name: 'DuplicateKeyError', code: 11000 });
 
-    expect(racingInsert.insertedId).toBe('during-build');
+    expect(racingSend.mock.calls.some(([command]) =>
+      command.constructor.name === 'ListObjectsV2Command',
+    )).toBe(false);
     const duplicates = Object.entries(simulator.dump())
       .filter(([key]) => key.startsWith('unique-build-write-race/data/'))
       .map(([, body]) => JSON.parse(body))
       .filter(document => document.email === 'build@example.test');
-    expect(duplicates).toHaveLength(1);
+    expect(duplicates.map(document => document._id)).toEqual(['build-seed']);
   });
 
   it('releases a claimed key when a definite document write failure occurs', async () => {
