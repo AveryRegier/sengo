@@ -235,8 +235,13 @@ Operation order:
    conditionally; then maintain non-unique indexes. If document insertion or
    later maintenance fails, release only this operation's newly claimed
    memberships and report the original error (plus cleanup failure if cleanup
-   also fails). Duplicate detection happens before the document object is
-   written.
+   also fails). For a network error from the document PUT, verify only that
+   document key before deciding whether to release claims. If the stored
+   document matches the attempted insert, or verification itself fails, retain
+   the claims and throw `MongoWriteOutcomeUnknownError`; if the key is
+   confirmed absent, release the claims and report the original network error.
+   A different document at the key is an `_id` duplicate. Duplicate detection
+   happens before the document object is written.
 2. **Update:** load the authoritative old document using the existing `_id`
    conditional-write path and apply the update to that record. Derive old and
    new memberships. Keep unchanged memberships; claim all new unique
@@ -261,8 +266,10 @@ earlier claims made by that operation. Since S3 offers no transaction across
 entry objects and the document object, compensation is best-effort and errors
 must remain explicit; do not convert cleanup failure into apparent success.
 For ambiguous S3 responses, re-read only the specific affected entry/document
-objects before compensating. Never list or scan the collection to recover a
-write.
+objects before compensating. Never release unique claims unless the document
+key is confirmed absent; when verification is inconclusive, retain claims to
+avoid admitting a duplicate and report the unknown outcome. Never list or scan
+the collection to recover a write.
 
 For a failed compensation or post-delete release, track the specific owner and
 entry as suspect in the store. A normal duplicate check trusts the exact index
@@ -442,7 +449,7 @@ already-built index.
 - **Given** a document owning a unique tuple, **when** it is deleted, **then** that tuple becomes reusable; cleanup never removes a tuple now owned by another document.
 - **Given** duplicate existing documents, **when** unique index creation/backfill runs, **then** it fails with `DuplicateKeyError`, preserves documents, and leaves no active invalid unique index.
 - **Given** unique-index backfill racing a write from another Lambda, **when** both overlap, **then** the build protocol prevents a duplicate from slipping past validation/publication.
-- **Given** a known document-write failure after index changes begin, **when** the operation fails, **then** compensation/recovery leaves no false unique ownership. For an ambiguous S3 response, reread authoritative state before cleanup.
+- **Given** a known document-write failure after index changes begin, **when** the operation fails, **then** compensation/recovery leaves no false unique ownership. For an ambiguous S3 response, verify the exact document key; release claims only when absence is confirmed, otherwise retain claims and report an unknown outcome.
 - **Given** a non-unique index, **when** duplicate values are inserted across processes, **then** all IDs remain in the index entry.
 - **Given** a unique compound index and a query matching leading and final fields, **when** `find` executes, **then** final-field data filters candidates before document fetch.
 - **Given** a unique compound index and a prefix query sorted by the final field, **when** a limited find executes, **then** existing sort/limit optimization remains available.

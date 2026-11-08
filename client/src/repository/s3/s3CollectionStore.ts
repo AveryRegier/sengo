@@ -1,4 +1,4 @@
-import { MongoClientClosedError, MongoInvalidArgumentError, MongoServerError, MongoNetworkError, DuplicateKeyError, PreconditionFailedError } from '../../errors.js'; // Import MongoDB error classes
+import { MongoClientClosedError, MongoInvalidArgumentError, MongoServerError, MongoNetworkError, MongoWriteOutcomeUnknownError, DuplicateKeyError, PreconditionFailedError } from '../../errors.js'; // Import MongoDB error classes
 // (stray dropIndex removed, now only in class body)
 import type { CollectionIndex } from '../collectionIndex';
 import { S3CollectionIndex } from './s3CollectionIndex';
@@ -476,7 +476,9 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       await this.s3.send(new PutObjectCommand(args));
     } catch (err: any) {
       if (err.name === 'TimeoutError' || err.name === 'NetworkingError' || /network|timeout|etimedout|econnrefused/i.test(err.message)) {
-        throw new MongoNetworkError(err.message || 'Network error');
+        throw new MongoNetworkError(err.message || 'Network error', {
+          cause: err instanceof Error ? err : new Error(String(err)),
+        });
       }
       throw err;
     }
@@ -554,6 +556,8 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   async insertOne(id: any, doc: WithId<T>): Promise<void> {
     const logger = getLogger();
+    const key = this.id2key(id);
+    const body = JSON.stringify(doc);
     try {
       logger.debug('Inserting document with duplicate check', { _id: id });
       // Use IfNoneMatch: '*' to ensure the document doesn't already exist
@@ -564,6 +568,39 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
         throw new DuplicateKeyError(
           `E11000 duplicate key error collection: ${this.collection} index: _id_ dup key: { _id: ${id} }`
         );
+      }
+      if (err instanceof MongoNetworkError) {
+        let stored: WithId<T> | null;
+        try {
+          stored = await this.loadRecordByKey(key);
+        } catch (verificationError) {
+          if (verificationError instanceof Error && verificationError.name === 'NoSuchKey') {
+            stored = null;
+          } else {
+            throw new MongoWriteOutcomeUnknownError(
+              `Insert ${id} failed with "${err.message}", and its outcome could not be verified after "${verificationError instanceof Error ? verificationError.message : String(verificationError)}"; any unique index claims were retained`,
+              {
+                cause: verificationError instanceof Error
+                  ? verificationError
+                  : new Error(String(verificationError)),
+              },
+            );
+          }
+        }
+
+        if (stored && JSON.stringify(stored) === body) {
+          throw new MongoWriteOutcomeUnknownError(
+            `A document matching insert ${id} exists, but it is unknown whether this attempt created it; any unique index claims were retained`,
+            {
+              cause: err instanceof Error ? err : new Error(String(err)),
+            },
+          );
+        }
+        if (stored) {
+          throw new DuplicateKeyError(
+            `E11000 duplicate key error collection: ${this.collection} index: _id_ dup key: { _id: ${id} }`
+          );
+        }
       }
       throw err;
     }

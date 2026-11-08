@@ -1,4 +1,4 @@
-import { MongoClientClosedError, MongoServerError, DuplicateKeyError, PreconditionFailedError } from '../errors.js';
+import { MongoClientClosedError, MongoServerError, MongoWriteOutcomeUnknownError, DuplicateKeyError, PreconditionFailedError } from '../errors.js';
 import { CandidateLoadDocuments, normalizeIndexKeys, type CollectionIndex, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { CreateIndexOptions, FindCursor, IndexDefinition, WithId } from '../types';
@@ -120,6 +120,9 @@ export class SengoCollection<T> {
             }
           }
         } catch (error) {
+          if (error instanceof MongoWriteOutcomeUnknownError) {
+            throw error;
+          }
           const cleanupErrors: unknown[] = [];
           for (const index of claimedUniqueIndexes.reverse()) {
             try {

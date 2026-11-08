@@ -812,9 +812,11 @@ describe('unique indexes', () => {
     expect(simulator.getFile('unique-definite-write-failure/data/failed.json')).toBeUndefined();
   });
 
-  it.fails('RECOVERY GAP: detects a document write that succeeded remotely but timed out locally', async () => {
+  it('retains the unique claim when an ambiguous write finds the matching document', async () => {
     const { collection, simulator, send } = makeS3Collection('unique-ambiguous-write-failure');
     await collection.createIndex({ email: 1 }, { unique: true });
+    send.mockClear();
+    simulator.clearLogs();
     let timeoutAfterWrite = true;
     send.mockImplementation(async (command: any) => {
       const result = await simulator.handleCommand(command);
@@ -834,12 +836,99 @@ describe('unique indexes', () => {
       tenant: 'north',
       handle: 'first',
       email: 'ambiguous@example.test',
-    })).rejects.toThrow();
+    })).rejects.toMatchObject({ name: 'MongoWriteOutcomeUnknownError' });
     await expect(collection.insertOne({
       _id: 'second',
       tenant: 'south',
       handle: 'second',
       email: 'ambiguous@example.test',
     })).rejects.toMatchObject({ name: 'DuplicateKeyError', code: 11000 });
+    expect(send.mock.calls.some(([command]) =>
+      command.constructor.name === 'GetObjectCommand' &&
+      command.input.Key === 'unique-ambiguous-write-failure/data/first.json',
+    )).toBe(true);
+    expect(send.mock.calls.some(([command]) =>
+      command.constructor.name === 'ListObjectsV2Command',
+    )).toBe(false);
+    expect(simulator.getFile('unique-ambiguous-write-failure/data/first.json')).toContain('ambiguous@example.test');
+  });
+
+  it('releases unique claims when timeout verification confirms the document is absent', async () => {
+    const { collection, simulator, send } = makeS3Collection('unique-timeout-before-write');
+    await collection.createIndex({ email: 1 }, { unique: true });
+    send.mockClear();
+    simulator.clearLogs();
+    let timeoutBeforeWrite = true;
+    send.mockImplementation(async (command: any) => {
+      if (
+        timeoutBeforeWrite &&
+        command.constructor.name === 'PutObjectCommand' &&
+        command.input.Key === 'unique-timeout-before-write/data/first.json'
+      ) {
+        timeoutBeforeWrite = false;
+        throw Object.assign(new Error('injected timeout before remote write'), { name: 'TimeoutError' });
+      }
+      return simulator.handleCommand(command);
+    });
+
+    await expect(collection.insertOne({
+      _id: 'first',
+      tenant: 'north',
+      handle: 'first',
+      email: 'retry@example.test',
+    })).rejects.toThrow('injected timeout before remote write');
+    await expect(collection.insertOne({
+      _id: 'retry',
+      tenant: 'south',
+      handle: 'retry',
+      email: 'retry@example.test',
+    })).resolves.toMatchObject({ insertedId: 'retry' });
+    expect(simulator.getFile('unique-timeout-before-write/data/first.json')).toBeUndefined();
+    expect(send.mock.calls.some(([command]) =>
+      command.constructor.name === 'GetObjectCommand' &&
+      command.input.Key === 'unique-timeout-before-write/data/first.json',
+    )).toBe(true);
+    expect(send.mock.calls.some(([command]) =>
+      command.constructor.name === 'ListObjectsV2Command',
+    )).toBe(false);
+  });
+
+  it('retains unique claims when timeout verification also fails', async () => {
+    const { collection, simulator, send } = makeS3Collection('unique-timeout-unverified');
+    await collection.createIndex({ email: 1 }, { unique: true });
+    send.mockClear();
+    simulator.clearLogs();
+    send.mockImplementation(async (command: any) => {
+      if (
+        command.constructor.name === 'PutObjectCommand' &&
+        command.input.Key === 'unique-timeout-unverified/data/first.json'
+      ) {
+        await simulator.handleCommand(command);
+        throw Object.assign(new Error('injected response timeout'), { name: 'TimeoutError' });
+      }
+      if (
+        command.constructor.name === 'GetObjectCommand' &&
+        command.input.Key === 'unique-timeout-unverified/data/first.json'
+      ) {
+        throw Object.assign(new Error('injected verification timeout'), { name: 'TimeoutError' });
+      }
+      return simulator.handleCommand(command);
+    });
+
+    await expect(collection.insertOne({
+      _id: 'first',
+      tenant: 'north',
+      handle: 'first',
+      email: 'uncertain@example.test',
+    })).rejects.toMatchObject({ name: 'MongoWriteOutcomeUnknownError' });
+    await expect(collection.insertOne({
+      _id: 'second',
+      tenant: 'south',
+      handle: 'second',
+      email: 'uncertain@example.test',
+    })).rejects.toMatchObject({ name: 'DuplicateKeyError', code: 11000 });
+    expect(send.mock.calls.some(([command]) =>
+      command.constructor.name === 'ListObjectsV2Command',
+    )).toBe(false);
   });
 });

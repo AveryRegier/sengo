@@ -27,6 +27,16 @@ export class MongoNetworkError extends MongoError {
 }
 
 /**
+ * A network failure whose write outcome could not be safely resolved.
+ */
+export class MongoWriteOutcomeUnknownError extends MongoNetworkError {
+  constructor(message?: string, options?: { cause?: Error }) {
+    super(message, options);
+    this.name = 'MongoWriteOutcomeUnknownError';
+  }
+}
+
+/**
  * Error thrown when a timeout occurs.
  */
 export class MongoTimeoutError extends MongoNetworkError {
