@@ -6,7 +6,7 @@ import { ComparisonOperators, getComparisonFn } from '../client/expression.js';
 import type { ExplainSink } from '../client/explain';
 import logger from "../client/logger";
 import { addContext, addContexts, MetaDataValue } from "clox";
-import { getFieldPathValues, resolveFieldPath } from '../util/fieldPath';
+import { expandFieldPathArrays, getFieldPathValues, resolveFieldPath, type FieldPathValue } from '../util/fieldPath';
 
 function areIndexValuesEqual(left: unknown, right: unknown): boolean {
   return encodeUniqueIndexValue(left) === encodeUniqueIndexValue(right);
@@ -16,7 +16,7 @@ function encodeUniqueIndexValue(value: any): string {
   if (value === undefined || value === null) return 'null';
   if (value instanceof Date) return `date:${value.toISOString()}`;
   if (typeof value === 'string') return `string:${JSON.stringify(value)}`;
-  if (typeof value === 'number') return `number:${Object.is(value, -0) ? '-0' : String(value)}`;
+  if (typeof value === 'number') return `number:${String(value)}`;
   if (typeof value === 'boolean') return `boolean:${value}`;
   if (typeof value === 'bigint') return `bigint:${value.toString()}`;
   if (Array.isArray(value)) {
@@ -29,13 +29,23 @@ function encodeUniqueIndexValue(value: any): string {
         : value.toString();
       return `bson:${value._bsontype}:${serializedValue}`;
     }
-    const fields = Object.keys(value).sort().map(key =>
+    const fields = Object.keys(value).map(key =>
       `${JSON.stringify(key)}:${JSON.stringify(encodeUniqueIndexValue(value[key]))}`
     );
     return `object:{${fields.join(',')}}`;
   }
   return `${typeof value}:${String(value)}`;
 }
+
+function encodeUniqueIndexPathComponent(value: unknown): string {
+  return encodeURIComponent(encodeUniqueIndexValue(value));
+}
+
+type UniqueIndexMembership = {
+  entryKey: string;
+  sortValue?: unknown;
+  tupleKey: string;
+};
 
 export interface CollectionIndex {
   name: string;
@@ -47,6 +57,7 @@ export interface CollectionIndex {
   
   addDocument(doc: Record<string, any>): Promise<void>;
   removeDocument(doc: Record<string, any>): Promise<void>
+  hasSameUniqueKey(left: Record<string, any>, right: Record<string, any>): boolean;
   /**
    * Update the index for a document update. Receives the old and new document.
    * The index implementation should decide if any index maintenance is needed.
@@ -69,7 +80,8 @@ export type IndexOptions = {
 
 export type IndexEntryMutation =
   | { sequence: number; kind: 'add'; id: string; sortValue?: any }
-  | { sequence: number; kind: 'remove'; id: string };
+  | { sequence: number; kind: 'remove'; id: string }
+  | { sequence: number; kind: 'removeMembership'; id: string; sortValue: any };
 
 export class IndexEntry {
   private ids: string[] = [];  // Maintain sorted order
@@ -78,7 +90,7 @@ export class IndexEntry {
   added: Set<string> | undefined = undefined;
   removed: Set<string> | undefined = undefined;
   private keys: NormalizedIndexKeyRecord[];  // Index definition
-  private sortValues: Map<string, any> = new Map();  // Maps id -> secondary key value for sorting
+  private sortValues: Map<string, any[]> = new Map();
   private mutations: IndexEntryMutation[] = [];
   private nextMutationSequence = 0;
 
@@ -90,14 +102,13 @@ export class IndexEntry {
 
   public add(id: string, sortValue?: any, recordMutation = true): boolean {
     const existingIndex = this.ids.indexOf(id);
-    if (existingIndex !== -1) {
-      return false; // Already exists
-    }
-
     if (this.unique) {
-      const duplicateIndex = this.ids.findIndex((existingId, index) =>
+      const duplicateIndex = this.ids.findIndex(existingId =>
         existingId !== id &&
-        (this.keys.length === 1 || areIndexValuesEqual(this.sortValues.get(existingId), sortValue))
+        (this.keys.length === 1 ||
+          (this.sortValues.get(existingId) ?? [undefined]).some(existingValue =>
+            areIndexValuesEqual(existingValue, sortValue)
+          ))
       );
       if (duplicateIndex !== -1) {
         throw new DuplicateKeyError(`E11000 duplicate key error dup key: ${JSON.stringify(sortValue ?? null)}`);
@@ -105,49 +116,49 @@ export class IndexEntry {
     }
 
     const hasSortKey = this.keys.length > 1;
-    // Store sort value if provided and we have multiple keys (final key is for sorting)
-    if (sortValue !== undefined && hasSortKey) {
-      this.sortValues.set(id, sortValue);
+    if (existingIndex !== -1) {
+      if (!this.unique || !hasSortKey) return false;
+      const values = this.sortValues.get(id) ?? [];
+      if (values.some(value => areIndexValuesEqual(value, sortValue))) return false;
+      values.push(sortValue);
+      this.sortValues.set(id, values);
+      this.reorderBySortValue();
+      this.recordAdd(id, sortValue, recordMutation);
+      return true;
     }
 
-    // Insert in sorted position if we have a sort key with sort values, otherwise append
-    if (hasSortKey && this.sortValues.size > 0) {
-      // Find insertion point using binary search
-      let left = 0;
-      let right = this.ids.length;
-      const newSortValue = this.sortValues.get(id);
-      
-      while (left < right) {
-        const mid = Math.floor((left + right) / 2);
-        const midId = this.ids[mid];
-        const midSortValue = this.sortValues.get(midId);
-        
-        const comparison = this.compareValues(newSortValue, midSortValue);
-        if (comparison < 0) {
-          right = mid;
-        } else {
-          left = mid + 1;
-        }
-      }
-      
-      this.ids.splice(left, 0, id);
-    } else {
-      this.ids.push(id);
+    if (hasSortKey && sortValue !== undefined) {
+      this.sortValues.set(id, [sortValue]);
     }
+    this.ids.push(id);
+    this.reorderBySortValue();
+    this.recordAdd(id, sortValue, recordMutation);
+    return true;
+  }
 
-    if (!this.added) {
-      this.added = new Set();
-    }
-    // Cancel out a previous remove in the same dirty cycle.
-    if (this.removed?.has(id)) {
-      this.removed.delete(id);
-    }
+  private recordAdd(id: string, sortValue: any, recordMutation: boolean): void {
+    if (!this.added) this.added = new Set();
+    if (this.removed?.has(id)) this.removed.delete(id);
     this.added.add(id);
     this.dirty = true;
     if (recordMutation) {
       this.mutations.push({ sequence: ++this.nextMutationSequence, kind: 'add', id, sortValue });
     }
-    return true;
+  }
+
+  private sortValueForOrdering(id: string): any {
+    const values = this.sortValues.get(id) ?? [];
+    return values.reduce((best, value) =>
+      best === undefined || this.compareValues(value, best) < 0 ? value : best
+    , undefined);
+  }
+
+  private reorderBySortValue(): void {
+    if (this.keys.length > 1) {
+      this.ids.sort((left, right) =>
+        this.compareValues(this.sortValueForOrdering(left), this.sortValueForOrdering(right))
+      );
+    }
   }
 
   private compareValues(a: any, b: any): number {
@@ -188,6 +199,31 @@ export class IndexEntry {
     return false;
   }
 
+  public removeMembership(id: string, sortValue: any, recordMutation = true): boolean {
+    if (!this.unique || this.keys.length <= 1) return this.remove(id, recordMutation);
+    const values = this.sortValues.get(id);
+    if (!values) return false;
+    const index = values.findIndex(value => areIndexValuesEqual(value, sortValue));
+    if (index === -1) return false;
+
+    values.splice(index, 1);
+    if (values.length === 0) {
+      this.sortValues.delete(id);
+      this.ids = this.ids.filter(existingId => existingId !== id);
+      if (!this.removed) this.removed = new Set();
+      if (this.added?.has(id)) this.added.delete(id);
+      this.removed.add(id);
+    } else {
+      this.sortValues.set(id, values);
+    }
+    this.dirty = true;
+    if (recordMutation) {
+      this.mutations.push({ sequence: ++this.nextMutationSequence, kind: 'removeMembership', id, sortValue });
+    }
+    this.reorderBySortValue();
+    return true;
+  }
+
   public update(newData: string): void {
     this.replaceCommitted(newData, 0);
   }
@@ -208,8 +244,10 @@ export class IndexEntry {
     for (const mutation of pending) {
       if (mutation.kind === 'add') {
         this.add(mutation.id, mutation.sortValue, false);
-      } else {
+      } else if (mutation.kind === 'remove') {
         this.remove(mutation.id, false);
+      } else {
+        this.removeMembership(mutation.id, mutation.sortValue, false);
       }
     }
 
@@ -269,11 +307,12 @@ export class IndexEntry {
             // Type guard: ensure opts is ComparisonOperators (object with operator keys)
             if (typeof opts === 'object' && opts !== null && !Array.isArray(opts)) {
               return res.filter(id => {
-                const sortValue = this.sortValues.get(id);
-                return Object.entries(opts as ComparisonOperators).every(([op, val]) => {
-                  const compareFn = getComparisonFn(op);
-                  return compareFn(sortValue, val);
-                }); 
+                return (this.sortValues.get(id) ?? [undefined]).some(sortValue =>
+                  Object.entries(opts as ComparisonOperators).every(([op, val]) => {
+                    const compareFn = getComparisonFn(op);
+                    return compareFn(sortValue, val);
+                  })
+                );
               });
             }
             return res;
@@ -281,7 +320,7 @@ export class IndexEntry {
         
         // Apply reversal if needed BEFORE applying limit
         if (needsReversal) {
-          results = workingIds.reverse();
+          results = results.reverse();
         }
         
         if(options.limit !== undefined && options.limit > 0)
@@ -297,15 +336,22 @@ export class IndexEntry {
     const parsed = JSON.parse(serialized);
     this.ids = [];
     this.sortValues.clear();
-    
+
     const hasSecondaryKey = this.keys.length > 1;
+    if (parsed && !Array.isArray(parsed) && parsed.version === 1 && Array.isArray(parsed.entries)) {
+      for (const [id, sortValues] of parsed.entries) {
+        this.ids.push(id);
+        if (hasSecondaryKey && Array.isArray(sortValues)) this.sortValues.set(id, sortValues);
+      }
+      return;
+    }
     // Handle both formats: old format ["id1", "id2"] and new format [["id1", sortVal1], ["id2", sortVal2]]
     if (parsed.length > 0 && Array.isArray(parsed[0])) {
       // New format with sort values - trust the order from storage
       for (const [id, sortValue] of parsed) {
         this.ids.push(id);
         if (sortValue !== undefined && hasSecondaryKey) {
-          this.sortValues.set(id, sortValue);
+          this.sortValues.set(id, [sortValue]);
         }
       }
     } else {
@@ -318,8 +364,12 @@ export class IndexEntry {
     // If we have sort values, serialize as tuples: [[id, sortValue], ...]
     // Otherwise, use simple array format: [id, ...]
     // Order is already maintained in this.ids
+    if (this.unique && this.keys.length > 1) {
+      const entries = this.ids.map(id => [id, this.sortValues.get(id) ?? []]);
+      return JSON.stringify({ version: 1, entries });
+    }
     if (this.keys.length > 1 && this.sortValues.size > 0) {
-      const entries = this.ids.map(id => [id, this.sortValues.get(id)]);
+      const entries = this.ids.map(id => [id, this.sortValues.get(id)?.[0]]);
       return JSON.stringify(entries);
     }
     return JSON.stringify(this.ids);
@@ -411,16 +461,22 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
    * Removes the old doc from the old key if the key changes, then adds the new doc to the new key.
    */
   public async updateIndexOnDocumentUpdate(oldDoc: Record<string, any>, newDoc: Record<string, any>): Promise<void> {
-    // Only call removeDocument if oldDoc has an _id
-    if (oldDoc && oldDoc._id) {
-      await this.changeIndex(oldDoc, (entry, id, keys) => {
-        for (const cur of keys) {
-          if (oldDoc[cur.field] !== newDoc[cur.field]) {
-            return entry.remove(id);
-          }
-        }
-        return false;
-      });
+    if (this.unique) {
+      if (this.hasSameUniqueKey(oldDoc, newDoc)) return;
+      await this.removeDocument(oldDoc);
+      await this.addDocument(newDoc);
+      await this.flush();
+      return;
+    }
+
+    const sameKey = this.keys.every(key => {
+      const oldValues = this.getIndexFieldValues(oldDoc, key.field).map(encodeUniqueIndexValue);
+      const newValues = this.getIndexFieldValues(newDoc, key.field).map(encodeUniqueIndexValue);
+      return oldValues.length === newValues.length &&
+        oldValues.every((value, index) => value === newValues[index]);
+    });
+    if (!sameKey && oldDoc?._id) {
+      await this.removeDocument(oldDoc);
     }
     await this.addDocument(newDoc).finally(() => {
       // Ensure the index is flushed after adding the new document
@@ -429,6 +485,9 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   public async addDocument(doc: Record<string, any>): Promise<void> {
+    if (this.unique) {
+      return this.changeUniqueIndex(doc, true);
+    }
     return await this.changeIndex(doc,  (entry, id, keys) => {
       // If there are multiple keys, extract the final key's value for sorting
       const sortValue = keys.length > 1
@@ -443,7 +502,63 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
    * Subclasses may override to add persistence or other side effects.
    */
   public async removeDocument(doc: Record<string, any>): Promise<void> {
+    if (this.unique) {
+      return this.changeUniqueIndex(doc, false);
+    }
     return await this.changeIndex(doc, (entry, id) => entry.remove(id));
+  }
+
+  private async changeUniqueIndex(doc: Record<string, any>, add: boolean): Promise<void> {
+    if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
+    const id = doc._id.toString();
+    const memberships = this.getUniqueIndexMemberships(doc);
+    if (!add) {
+      for (const entryKey of new Set(memberships.map(membership => membership.entryKey))) {
+        await this.changeSpecifiIndexEntry(entryKey, id, entry => entry.remove(id));
+      }
+      return;
+    }
+
+    const attempted: UniqueIndexMembership[] = [];
+    try {
+      for (const membership of memberships) {
+        let changed = false;
+        try {
+          await this.changeSpecifiIndexEntry(
+            membership.entryKey,
+            id,
+            entry => {
+              changed = entry.add(id, membership.sortValue);
+              return changed;
+            },
+          );
+        } catch (error) {
+          if (changed) attempted.push(membership);
+          throw error;
+        }
+        if (changed) attempted.push(membership);
+      }
+    } catch (error) {
+      const cleanupErrors: unknown[] = [];
+      for (const membership of attempted.reverse()) {
+        try {
+          await this.changeSpecifiIndexEntry(
+            membership.entryKey,
+            id,
+            entry => entry.removeMembership(id, membership.sortValue),
+          );
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError);
+        }
+      }
+      if (cleanupErrors.length > 0) {
+        throw new MongoServerError(
+          `Unique index claim failed and ${cleanupErrors.length} membership(s) could not be rolled back`,
+          { cause: error instanceof Error ? error : new Error(String(error)) },
+        );
+      }
+      throw error;
+    }
   }
 
   private async changeIndex(doc: Record<string, any>, fn: (entry: IndexEntry, id: string, keys: NormalizedIndexKeyRecord[]) => boolean) {
@@ -471,13 +586,15 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
 
   private async changeSpecifiIndexEntry(key: string, id: string, fn: (entry: IndexEntry, id: string, keys: NormalizedIndexKeyRecord[]) => boolean) {
     let entry = await this.fetch(key);
+    let changed = false;
     if (entry) {
-      fn(entry, id, this.keys);
+      changed = fn(entry, id, this.keys);
     }
 
     if (entry && entry.dirty) {
       await this.persist(key, entry);
     }
+    return changed;
   }
 
   public findKeysForQuery(query: Record<string, any>, sink?: ExplainSink): string[] {
@@ -488,7 +605,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
     // Build index keys by combining non-final field values from the query
     const keys = keysForIndexPath.reduce((acc, key, idx) => {
       const valueToFind = query[key.field];
-      if (valueToFind === undefined || valueToFind === null) {
+      if (valueToFind === undefined || (valueToFind === null && !this.unique)) {
         // If any non-final field is missing, we can't build a complete key
         // Stop here and return what we have so far
         return acc;
@@ -514,8 +631,97 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   public makeAllIndexEntryKeys(doc: Record<string, any>): string[] {
+    if (this.unique) {
+      return Array.from(new Set(this.getUniqueIndexMemberships(doc).map(membership => membership.entryKey)));
+    }
     const validKeys: NormalizedIndexKeyRecord[] = this.filterValidKeysForRecord(doc);
     return this.mapKeyValuesToIndexFormat(validKeys, doc);
+  }
+
+  private getUniqueIndexMemberships(doc: Record<string, any>): UniqueIndexMembership[] {
+    const valuesByField = this.keys.map(key => {
+      const resolution = resolveFieldPath(doc, key.field);
+      const values = expandFieldPathArrays(resolution);
+      return values.length > 0 ? values : [{ value: null, arrayAncestry: [] }];
+    });
+
+    this.validateNoParallelArrays(valuesByField);
+
+    type TupleValue = {
+      values: unknown[];
+      ancestry: Map<string, number>;
+    };
+    const tupleValues: TupleValue[] = [];
+    const combine = (fieldIndex: number, current: TupleValue): void => {
+      if (fieldIndex === valuesByField.length) {
+        tupleValues.push(current);
+        return;
+      }
+
+      for (const value of valuesByField[fieldIndex]) {
+        const ancestry = new Map(current.ancestry);
+        const pathCounts = new Map<string, number>();
+        let compatible = true;
+        for (const position of value.arrayAncestry) {
+          const ordinal = pathCounts.get(position.path) ?? 0;
+          pathCounts.set(position.path, ordinal + 1);
+          const ancestryKey = `${position.path}#${ordinal}`;
+          const existingIndex = ancestry.get(ancestryKey);
+          if (existingIndex !== undefined && existingIndex !== position.index) {
+            compatible = false;
+            break;
+          }
+          ancestry.set(ancestryKey, position.index);
+        }
+        if (compatible) {
+          combine(fieldIndex + 1, {
+            values: [...current.values, value.value],
+            ancestry,
+          });
+        }
+      }
+    };
+    combine(0, { values: [], ancestry: new Map() });
+
+    const memberships = new Map<string, UniqueIndexMembership>();
+    for (const tuple of tupleValues) {
+      const tupleParts = tuple.values.map(encodeUniqueIndexValue);
+      const tupleKey = JSON.stringify(tupleParts);
+      const pathValues = this.keys.length > 1 ? tuple.values.slice(0, -1) : tuple.values;
+      const entryKey = pathValues.map(encodeUniqueIndexPathComponent).join('|');
+      memberships.set(tupleKey, {
+        entryKey,
+        ...(this.keys.length > 1 ? { sortValue: tuple.values[tuple.values.length - 1] } : {}),
+        tupleKey,
+      });
+    }
+    return Array.from(memberships.values());
+  }
+
+  private validateNoParallelArrays(valuesByField: FieldPathValue[][]): void {
+    for (let leftIndex = 0; leftIndex < valuesByField.length; leftIndex++) {
+      const leftPaths = new Set(valuesByField[leftIndex].flatMap(value =>
+        value.arrayAncestry.map(position => position.path)
+      ));
+      for (let rightIndex = leftIndex + 1; rightIndex < valuesByField.length; rightIndex++) {
+        const rightPaths = new Set(valuesByField[rightIndex].flatMap(value =>
+          value.arrayAncestry.map(position => position.path)
+        ));
+        for (const leftPath of leftPaths) {
+          for (const rightPath of rightPaths) {
+            if (
+              leftPath !== rightPath &&
+              !leftPath.startsWith(`${rightPath}.`) &&
+              !rightPath.startsWith(`${leftPath}.`)
+            ) {
+              throw new MongoInvalidArgumentError(
+                `Cannot create a compound multikey index with parallel arrays at "${leftPath}" and "${rightPath}"`,
+              );
+            }
+          }
+        }
+      }
+    }
   }
 
   private filterValidKeysForRecord(doc: Record<string, any>) {
@@ -547,19 +753,22 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   private getIndexFieldValues(doc: Record<string, any>, field: string): any[] {
-    return getFieldPathValues(doc, field).flatMap(({ value }) =>
-      Array.isArray(value) ? value : [value]
-    );
+    if (!this.unique) {
+      return getFieldPathValues(doc, field)
+        .filter(({ value }) => value !== undefined)
+        .flatMap(({ value }) =>
+        Array.isArray(value) ? value : [value]
+      );
+    }
+    return expandFieldPathArrays(resolveFieldPath(doc, field)).map(({ value }) => value);
   }
 
   public hasSameUniqueKey(left: Record<string, any>, right: Record<string, any>): boolean {
     if (!this.unique) return false;
-    return this.keys.every(key => {
-      const leftValues = this.getIndexFieldValues(left, key.field).map(encodeUniqueIndexValue);
-      const rightValues = this.getIndexFieldValues(right, key.field).map(encodeUniqueIndexValue);
-      return leftValues.length === rightValues.length &&
-        leftValues.every((value, index) => value === rightValues[index]);
-    });
+    const leftKeys = this.getUniqueIndexMemberships(left).map(membership => membership.tupleKey).sort();
+    const rightKeys = this.getUniqueIndexMemberships(right).map(membership => membership.tupleKey).sort();
+    return leftKeys.length === rightKeys.length &&
+      leftKeys.every((value, index) => value === rightKeys[index]);
   }
 
   protected async persist(key: string, entry: IndexEntry): Promise<void> {
@@ -584,28 +793,31 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   protected hasFirstKey(doc: Record<string, any>): boolean {
+    if (this.unique) return true;
     const value = this.getIndexFieldValues(doc, this.keys[0]?.field ?? '')[0];
     return value !== undefined && value !== null && value !== '';
   }
 
   private getLookupValues(valueToFind: any): string[] | null {
     if (valueToFind === undefined || valueToFind === null) {
-      return null;
+      return this.unique && valueToFind === null
+        ? [encodeUniqueIndexPathComponent(null)]
+        : null;
     }
 
     if (typeof valueToFind === 'object' && !Array.isArray(valueToFind)) {
       if (Array.isArray(valueToFind.$in)) {
-        return valueToFind.$in.map((v: any) => this.unique ? encodeUniqueIndexValue(v) : `${v}`);
+        return valueToFind.$in.map((v: any) => this.unique ? encodeUniqueIndexPathComponent(v) : `${v}`);
       }
 
       if (valueToFind.$eq !== undefined) {
-        return [this.unique ? encodeUniqueIndexValue(valueToFind.$eq) : `${valueToFind.$eq}`];
+        return [this.unique ? encodeUniqueIndexPathComponent(valueToFind.$eq) : `${valueToFind.$eq}`];
       }
 
       return null;
     }
 
-    return [this.unique ? encodeUniqueIndexValue(valueToFind) : `${valueToFind}`];
+    return [this.unique ? encodeUniqueIndexPathComponent(valueToFind) : `${valueToFind}`];
   }
 
   removeIdFromAllKeys<U>(id: string, doc: Record<string, any>): unknown {

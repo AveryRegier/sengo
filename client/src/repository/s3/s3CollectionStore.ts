@@ -348,17 +348,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
   async createIndex(name: string, keys: { field: string, order: 1 | -1 | 'text' }[], options?: CreateIndexOptions): Promise<CollectionIndex> {
     if (this.closed) throw new Error('Store is closed');
     await this.ensureIndexesLoaded();
-    // 1. Create and persist the index metadata file
     const index = { name, keys, ...(options?.unique === true ? { unique: true } : {}) };
-    const args = {
-      Bucket: this.bucket,
-      Key: `${this.collection}/indices/${name}.json`,
-      Body: JSON.stringify(index),
-      ContentType: 'application/json',
-    };
-    getLogger().debug(`Creating index metadata in S3`, { command: "putObject", args });
-    await this.s3.send(new PutObjectCommand(args));
-    // 2. Build the index by finding all records and adding them
     const s3Index = new S3CollectionIndex(name, keys, {
       s3: this.s3,
       collectionName: this.collection,
@@ -367,13 +357,40 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
     });
     // Expose last created index instance for test synchronization
     (this as any).lastIndexInstance = s3Index;
-    
-    // 3. Index all existing documents
-    const allDocs = await this.scan();
-    for (const doc of allDocs) {
-      await s3Index.addDocument(doc);
+
+    try {
+      const allDocs = await this.scan();
+      for (const doc of allDocs) {
+        await s3Index.addDocument(doc);
+      }
+      await s3Index.flush();
+    } catch (error) {
+      const entryKeys = await this.listObjectKeys(`${this.collection}/indices/${name}/`);
+      const cleanupErrors: unknown[] = [];
+      for (const key of entryKeys) {
+        try {
+          await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
+        } catch (cleanupError) {
+          cleanupErrors.push(cleanupError);
+        }
+      }
+      if (cleanupErrors.length > 0) {
+        throw new MongoServerError(
+          `Index build failed and ${cleanupErrors.length} entry file(s) could not be removed`,
+          { cause: error instanceof Error ? error : new Error(String(error)) },
+        );
+      }
+      throw error;
     }
-    
+
+    const args = {
+      Bucket: this.bucket,
+      Key: `${this.collection}/indices/${name}.json`,
+      Body: JSON.stringify(index),
+      ContentType: 'application/json',
+    };
+    getLogger().debug(`Creating index metadata in S3`, { command: "putObject", args });
+    await this.s3.send(new PutObjectCommand(args));
     this.loadedIndexes.set(name, s3Index);
     return s3Index;
   }

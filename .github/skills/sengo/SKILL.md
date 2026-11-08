@@ -63,6 +63,7 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
   - `string` key name
   - object key spec, e.g. `{ name: 1 }`
   - array key specs, e.g. `[{ name: 1 }, { age: -1 }]`
+  - optional `{ unique: true }` for unique single-field or compound indexes
 
 ## Rules to Produce Working Output
 1. Always start with `const collection = client.db(...).collection<...>(...)`.

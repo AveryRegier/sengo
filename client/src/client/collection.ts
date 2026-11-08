@@ -98,9 +98,9 @@ export class SengoCollection<T> {
       const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
       logger.debug('Inserting document', { doc: docWithId });
       
-      const indexes = await this.store.getIndexes();
       const indexNames: string[] = [];
       await serializeStoreWrite(this.store, async () => {
+        const indexes = await this.store.getIndexes();
         const claimedUniqueIndexes: CollectionIndex[] = [];
         try {
           for (const [name, index] of indexes) {
@@ -412,57 +412,75 @@ export class SengoCollection<T> {
         throw err;
       }
 
-      // Find the first matching document
-      const docs = await this.find(filter).toArray();
-      if (!docs.length) {
+      const outcome = await serializeStoreWrite(this.store, async () => {
+        const docs = await this.find(filter).toArray();
+        if (!docs.length) return null;
+
+        // Only update the first match (MongoDB semantics)
+        const doc = docs[0];
+
+        const validateFilter = (current: WithId<Record<string, any>>) => {
+          return this.docMatchesFilter(current, filter);
+        };
+
+        const applyUpdate = (current: WithId<Record<string, any>>) => {
+          let updatedDoc = { ...current };
+          if (update.$set) {
+            updatedDoc = { ...updatedDoc, ...update.$set };
+          }
+          return updatedDoc;
+        };
+
+        const indexes = await this.store.getIndexes();
+        const updatedDoc = applyUpdate(doc);
+        const claimedUniqueIndexes: CollectionIndex[] = [];
+        try {
+          for (const index of indexes.values()) {
+            if (index.unique && !index.hasSameUniqueKey(doc, updatedDoc)) {
+              await index.addDocument(updatedDoc);
+              claimedUniqueIndexes.push(index);
+            }
+          }
+          await this.store.updateOne(doc._id, applyUpdate as any, validateFilter as any);
+        } catch (error) {
+          const cleanupErrors: unknown[] = [];
+          for (const index of claimedUniqueIndexes.reverse()) {
+            try {
+              await index.updateIndexOnDocumentUpdate(updatedDoc, doc);
+            } catch (cleanupError) {
+              cleanupErrors.push(cleanupError);
+            }
+          }
+          if (cleanupErrors.length > 0) {
+            throw new MongoServerError(
+              `Update failed and ${cleanupErrors.length} unique index claim(s) could not be rolled back`,
+              { cause: error instanceof Error ? error : new Error(String(error)) },
+            );
+          }
+          if (error instanceof Error && error.message.includes('does not match filter after reload')) {
+            return null;
+          }
+          throw error;
+        }
+
+        const indexNames: string[] = [];
+        for (const [name, index] of indexes) {
+          indexNames.push(name);
+          logger.debug('Updating doc in index', { name, doc: updatedDoc });
+          await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+        }
+        return indexNames;
+      });
+
+      if (!outcome) {
         const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
         sink.onWriteCost(0, 0, 0, [], 0);
         sink.onOpEnd(true, Date.now() - startMs);
         return sink.finalize(result) ?? result;
       }
 
-      // Only update the first match (MongoDB semantics)
-      const doc = docs[0];
-
-      // Create a filter validator for the retry loop
-      const validateFilter = (current: WithId<Record<string, any>>) => {
-        return this.docMatchesFilter(current, filter);
-      };
-
-      // Define the update function to be applied
-      const applyUpdate = (current: WithId<Record<string, any>>) => {
-        let updatedDoc = { ...current };
-        if (update.$set) {
-          updatedDoc = { ...updatedDoc, ...update.$set };
-        }
-        return updatedDoc;
-      };
-
-      // Delegate retry logic to the store with filter validation (cast to match generic T)
-      try {
-        await this.store.updateOne(doc._id, applyUpdate as any, validateFilter as any);
-      } catch (err: any) {
-        // If filter stops matching after reload, treat as no match (matchedCount 0)
-        if (err.message && err.message.includes('does not match filter after reload')) {
-          const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
-          sink.onWriteCost(0, 0, 0, [], 0);
-          sink.onOpEnd(true, Date.now() - startMs);
-          return sink.finalize(result) ?? result;
-        }
-        throw err;
-      }
-
-      // Update indexes
-      const indexNames: string[] = [];
-      const updatedDoc = applyUpdate(doc);
-      for (const [name, index] of await this.store.getIndexes()) {
-        indexNames.push(name);
-        logger.debug('Updating doc in index', { name, doc: updatedDoc });
-        await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
-      }
-
       const result = { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
-      sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      sink.onWriteCost(1, 0, outcome.length, outcome, 0);
       sink.onOpEnd(true, Date.now() - startMs);
       return sink.finalize(result) ?? result;
     } catch (error) {
@@ -485,35 +503,40 @@ export class SengoCollection<T> {
     });
     const startMs = Date.now();
     try {
-      // Find the first matching document
-      const found = await this.find(filter).next();
-      if (!found) {
+      const logger = getLogger();
+      let outcome: string[] | null;
+      try {
+        outcome = await serializeStoreWrite(this.store, async () => {
+          const found = await this.find(filter).next();
+          if (!found) return null;
+
+          const indexNames: string[] = [];
+          await this.store.deleteOne(found);
+          for (const [name, index] of await this.store.getIndexes()) {
+            indexNames.push(name);
+            logger.debug('Removing doc in index', { name, doc: found });
+            await index.removeDocument(found);
+          }
+          return indexNames;
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === 'NoSuchKey') {
+          outcome = null;
+        } else {
+          logger.error(error instanceof Error ? error : new Error(String(error)), 'Error deleting document');
+          throw new MongoServerError('Failed to delete document', {
+            cause: error instanceof Error ? error : new Error(String(error)),
+          });
+        }
+      }
+      if (!outcome) {
         const result = { deletedCount: 0 };
         sink.onWriteCost(0, 0, 0, [], 0);
         sink.onOpEnd(true, Date.now() - startMs);
         return sink.finalize(result) ?? result;
       }
-      const logger = getLogger();
-      const docId = found._id;
-      const indexNames: string[] = [];
-      // Call the store to delete by _id
-      await this.store.deleteOne(found).then(async () => {
-        // Index maintenance: let each index handle the update logic
-        for (const [name, index] of await this.store.getIndexes()) {
-          indexNames.push(name);
-          logger.debug('Removing doc in index', { name, doc: found });
-          await index.removeDocument(found);
-        }
-      }).catch(err => {
-        if (err.name === 'NoSuchKey') {
-          return { deletedCount: 0 }; // Document not found, no action needed
-        } else {
-          logger.error('Error deleting document', err);
-          throw new MongoServerError('Failed to delete document', { cause: err });
-        }
-      });
       const result = { deletedCount: 1 };
-      sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      sink.onWriteCost(1, 0, outcome.length, outcome, 0);
       sink.onOpEnd(true, Date.now() - startMs);
       return sink.finalize(result) ?? result;
     } catch (error) {
@@ -523,24 +546,13 @@ export class SengoCollection<T> {
   }
 
   async createIndex(keys: IndexDefinition | IndexDefinition[], options?: CreateIndexOptions): Promise<string> {
-    const logger = getLogger();
     const normalizedKeys = normalizeIndexKeys(keys);
     // MongoDB-like index name: e.g. { name: 1, age: -1 } => 'name_1_age_-1'
     const fields = normalizedKeys.map(({ field, order }) => `${field}_${order}`).join('_');
-    // Actually create the index in the store
-    const index = await this.store.createIndex(fields || 'default_index', normalizedKeys, options);
-    // Build the index here (assume contract is always fulfilled)
-    logger.debug('Calling this.store.find({}) after index creation', { index: fields || 'default_index' });
-    const allDocs = this.find({});
-    if(await allDocs.hasNext()) {
-      do {
-        const doc = await allDocs.next();
-        if(doc) await index.addDocument(doc);
-      } while(await allDocs.hasNext());
-      // If this is the last document, flush
-      await index.flush();
-    }
-    return fields || 'default_index';
+    return serializeStoreWrite(this.store, async () => {
+      await this.store.createIndex(fields || 'default_index', normalizedKeys, options);
+      return fields || 'default_index';
+    });
   }
 
   /**

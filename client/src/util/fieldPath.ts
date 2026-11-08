@@ -17,6 +17,7 @@ export type FieldPathResolution = {
 export function resolveFieldPath(document: unknown, path: string): FieldPathResolution {
   const segments = path.split('.');
   const values: FieldPathValue[] = [];
+  let exists = false;
 
   if (!path || segments.some(segment => segment.length === 0)) {
     return { path, exists: false, values };
@@ -30,6 +31,7 @@ export function resolveFieldPath(document: unknown, path: string): FieldPathReso
   ): void => {
     if (segmentIndex === segments.length) {
       values.push({ value: current, arrayAncestry });
+      exists = exists || current !== undefined;
       return;
     }
 
@@ -46,6 +48,9 @@ export function resolveFieldPath(document: unknown, path: string): FieldPathReso
 
     const segment = segments[segmentIndex];
     if (!Object.prototype.hasOwnProperty.call(current, segment)) {
+      if (arrayAncestry.length > 0) {
+        values.push({ value: undefined, arrayAncestry });
+      }
       return;
     }
 
@@ -58,11 +63,39 @@ export function resolveFieldPath(document: unknown, path: string): FieldPathReso
   };
 
   visit(document, 0, '', []);
-  return { path, exists: values.length > 0, values };
+  return { path, exists, values };
 }
 
 export function getFieldPathValues(document: unknown, path: string): FieldPathValue[] {
   return resolveFieldPath(document, path).values;
+}
+
+export function expandFieldPathArrays(resolution: FieldPathResolution): FieldPathValue[] {
+  const expanded: FieldPathValue[] = [];
+
+  const expand = (
+    value: unknown,
+    arrayAncestry: FieldPathArrayPosition[],
+  ): void => {
+    if (!Array.isArray(value)) {
+      expanded.push({ value, arrayAncestry });
+      return;
+    }
+
+    if (value.length === 0) {
+      expanded.push({ value: null, arrayAncestry });
+      return;
+    }
+
+    value.forEach((item, index) => {
+      expand(item, [...arrayAncestry, { path: resolution.path, index }]);
+    });
+  };
+
+  for (const fieldValue of resolution.values) {
+    expand(fieldValue.value, fieldValue.arrayAncestry);
+  }
+  return expanded;
 }
 
 export function hasFieldPath(document: unknown, path: string): boolean {

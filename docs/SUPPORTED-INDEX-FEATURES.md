@@ -34,6 +34,25 @@ Accepted order values in index definitions include `1`, `-1`, and `text` by type
 - Order type: [client/src/types.ts](../client/src/types.ts#L3)
 - `text` normalization test: [client/tests/repository/normalizeIndexKeys.test.ts](../client/tests/repository/normalizeIndexKeys.test.ts#L19)
 
+## Unique Indexes
+
+- Create a unique single-field or compound index with
+  `createIndex({ email: 1 }, { unique: true })`.
+- Duplicate complete keys are rejected on insert and update; index creation
+  rejects existing duplicates and does not publish invalid metadata.
+- Missing and explicit `null` values share the same unique key. Compound
+  uniqueness compares the complete tuple.
+- Array values create deduplicated multikey memberships. Dotted paths through
+  embedded-document arrays preserve same-element tuple correlation; parallel
+  array expansion in one compound index is rejected.
+- Unique checks use the related index entry. Ordinary inserts do not list the
+  collection or read unrelated documents, and unique-index reads add no S3
+  lookups compared with equivalent non-unique index reads.
+- The cross-client shared-S3 race probe is present but skipped. Do not treat
+  uniqueness across independent processes as guaranteed until that probe is
+  enabled and passes.
+- Tests: [client/tests/client/unique-index.test.ts](../client/tests/client/unique-index.test.ts)
+
 ## Compound Index Behavior (Implemented)
 
 - Non-final fields are required to satisfy compound index lookup

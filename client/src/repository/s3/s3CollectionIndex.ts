@@ -143,8 +143,10 @@ export class S3CollectionIndex extends BaseCollectionIndex {
       for (const mutation of mutations) {
         if (mutation.kind === 'add') {
           fresh.add(mutation.id, mutation.sortValue);
-        } else {
+        } else if (mutation.kind === 'remove') {
           fresh.remove(mutation.id);
+        } else {
+          fresh.removeMembership(mutation.id, mutation.sortValue);
         }
       }
 

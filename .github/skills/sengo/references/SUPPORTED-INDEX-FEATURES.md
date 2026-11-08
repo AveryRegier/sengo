@@ -5,6 +5,7 @@ Use this file to keep index recommendations within real Sengo behavior.
 ## Supported Index APIs
 
 - `createIndex(keys)`
+- `createIndex(keys, { unique: true })` for unique single-field or compound keys
 - `dropIndex(name)`
 - `listIndexes()`
 
@@ -15,6 +16,17 @@ Use this file to keep index recommendations within real Sengo behavior.
 - Compound keys: `createIndex([{ a: 1 }, { b: -1 }])`
 
 Accepted key order values: `1`, `-1`, `text`.
+
+## Unique Index Semantics
+
+- Duplicate complete keys are rejected on insert and update.
+- Missing and explicit `null` values share one unique key; compound indexes
+  compare the full tuple.
+- Array values create deduplicated memberships and dotted paths through the
+  same embedded-document array remain correlated.
+- Independent array expansion in a compound index is rejected.
+- Cross-client/shared-S3 race behavior remains unverified; do not promise
+  cross-process uniqueness until the skipped race probe passes.
 
 ## Compound Index Guidance
 

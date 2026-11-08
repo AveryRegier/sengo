@@ -110,6 +110,7 @@ This section lists options supported by each client command, including commands 
     - single key string
     - single key object
     - array of strings/objects
+    - `{ unique: true }` to enforce unique single-field or compound keys
   - Implementation:
     - method signature in [client/src/client/collection.ts](../client/src/client/collection.ts#L155)
     - normalization in [client/src/repository/collectionIndex.ts](../client/src/repository/collectionIndex.ts#L524)
@@ -118,6 +119,7 @@ This section lists options supported by each client command, including commands 
   - Tests:
     - createIndex object key in [client/tests/repository/collectionIndex.test.ts](../client/tests/repository/collectionIndex.test.ts#L48)
     - compound/index-array key usage in [client/tests/client/listIndexes.test.ts](../client/tests/client/listIndexes.test.ts#L61)
+    - unique insert/update, multikey, and S3 request-budget behavior in [client/tests/client/unique-index.test.ts](../client/tests/client/unique-index.test.ts)
 - SengoCollection.dropIndex(name)
   - Supported options/args: required name only
   - Implementation: [client/src/client/collection.ts](../client/src/client/collection.ts#L27)
