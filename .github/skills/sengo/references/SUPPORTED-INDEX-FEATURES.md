@@ -25,8 +25,12 @@ Accepted key order values: `1`, `-1`, `text`.
 - Array values create deduplicated memberships and dotted paths through the
   same embedded-document array remain correlated.
 - Independent array expansion in a compound index is rejected.
-- Cross-client/shared-S3 race behavior remains unverified; do not promise
-  cross-process uniqueness until the skipped race probe passes.
+- Independent clients sharing S3 enforce uniqueness for writes against an
+  index whose metadata they have loaded.
+- Unique-index creation over existing data is not online-safe. Pause writes
+  during the build and restart/recreate application clients afterward because
+  each store caches index metadata and does not refresh it automatically. A
+  separate admin client alone does not coordinate active writers.
 
 ## Compound Index Guidance
 

@@ -48,9 +48,14 @@ Accepted order values in index definitions include `1`, `-1`, and `text` by type
 - Unique checks use the related index entry. Ordinary inserts do not list the
   collection or read unrelated documents, and unique-index reads add no S3
   lookups compared with equivalent non-unique index reads.
-- The cross-client shared-S3 race probe is present but skipped. Do not treat
-  uniqueness across independent processes as guaranteed until that probe is
-  enabled and passes.
+- Writes from independent clients sharing S3 are covered by race tests when
+  each client has loaded the unique index metadata.
+- Creating a unique index over existing documents is not an online operation.
+  Pause writes during index creation, then restart or recreate application
+  clients before writes resume. Each store caches index metadata when first
+  loaded and does not automatically discover indexes created later by another
+  client. Using a separate admin client is fine only with this pause-and-refresh
+  procedure; it does not coordinate active application clients.
 - Tests: [client/tests/client/unique-index.test.ts](../client/tests/client/unique-index.test.ts)
 
 ## Compound Index Behavior (Implemented)

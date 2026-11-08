@@ -115,7 +115,14 @@ Updating a shared entry must use conditional S3 writes:
 
 This prevents two processes from silently overwriting each other's changes to one index-entry object. S3 does not provide a transaction spanning an index entry and its document object. Failure recovery for partial document/index updates must therefore be specified separately.
 
-Unique-index creation over existing data is also a separate operation: the implementation must prevent concurrent writes from bypassing the index while it is being validated and built. Per-entry conditional writes protect competing entry updates but alone do not make index backfill atomic.
+Unique-index creation over existing data is also a separate operation. The
+scan, backfill, and metadata publication are not atomic with writes from other
+stores/processes, so online unique-index builds are unsupported. Pause writes
+while creating the index, then restart or recreate application clients before
+resuming writes. Each store loads and caches index metadata once; a separate
+admin client does not notify already-running clients about the new index.
+Creating the index through the same collection/store is serialized with writes
+through that store, but does not coordinate independent stores or processes.
 
 The exact missing/null behavior and array-valued index-field behavior must be documented and tested before claiming MongoDB compatibility. Sparse and partial unique indexes are out of scope unless explicitly added.
 
@@ -137,5 +144,5 @@ Explain output and tests should distinguish index entries read from document obj
 - Non-unique indexes remain one-to-many.
 - Unique constraints apply to complete index keys, not only S3 path prefixes.
 - S3 object writes are conditional per object; no multi-object transaction is implied.
-- Cross-process correctness must be tested with independent store/client instances sharing one S3 simulator.
-- Index metadata and index entries are separate objects. Publishing a unique index while other clients write requires an explicit build/write-coordination protocol.
+- Cross-process writes against an already-loaded unique index are tested with independent store/client instances sharing one S3 simulator.
+- Index metadata and index entries are separate objects. Unique-index creation requires paused writes and refreshing/recreating clients afterward; online builds and automatic metadata refresh are unsupported.

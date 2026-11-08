@@ -217,6 +217,15 @@ In S3-backed systems, the expensive part of a query is usually loading full docu
 
 This lets Sengo use index ordering more effectively, especially for top-N queries (`sort` + `limit`).
 
+### Creating unique indexes
+
+Unique-index creation scans and backfills existing documents, so it is not
+safe to run while other clients are writing to the collection. Pause writes
+until `createIndex` completes, then restart or recreate application clients
+before resuming writes. Stores cache index metadata and do not automatically
+discover an index created later by a separate admin client. See
+[docs/SUPPORTED-INDEX-FEATURES.md](docs/SUPPORTED-INDEX-FEATURES.md) for details.
+
 ### Generic Index Example
 
 ```ts

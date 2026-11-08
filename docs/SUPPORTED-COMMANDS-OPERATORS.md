@@ -111,6 +111,9 @@ This section lists options supported by each client command, including commands 
     - single key object
     - array of strings/objects
     - `{ unique: true }` to enforce unique single-field or compound keys
+  - Operational limitation: unique-index creation over existing documents
+    requires paused writes; restart/recreate application clients afterward so
+    they load the new index metadata. Online builds are not supported.
   - Implementation:
     - method signature in [client/src/client/collection.ts](../client/src/client/collection.ts#L155)
     - normalization in [client/src/repository/collectionIndex.ts](../client/src/repository/collectionIndex.ts#L524)

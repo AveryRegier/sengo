@@ -4,11 +4,11 @@
 
 This design covers unique indexes only. Upsert and `$setOnInsert` are separate features and are not covered here.
 
-The first implementation guarantees uniqueness within one store/process. S3
-entry writes continue to use conditional compare-and-swap, reload/reapply, and
-explicit error propagation, but the feature must not claim cross-process
-uniqueness until independent-client race tests pass. Cross-process tests are
-added as explicit skipped probes where that guarantee is not yet implemented.
+Writes against an existing unique index use conditional S3 compare-and-swap
+and revalidate conflicts against the latest entry across independent clients.
+Unique-index creation over existing data is not an online operation: its scan,
+backfill, and metadata publication are not atomic with writes from other
+stores/processes.
 
 See [S3-INDEX-PERSISTENCE-DESIGN.md](./S3-INDEX-PERSISTENCE-DESIGN.md) for the related persistence design, internal type separation, independent-Lambda Given/When/Then tests, simulator design, and exit criteria.
 
@@ -28,7 +28,21 @@ Both IDs share one S3 object because the object path is grouped by `category`; t
 
 For a unique compound index, reject a second ID only when the **complete tuple** matches. An ETag conflict alone is not a duplicate: another process may have added a distinct final-field value to the same grouped entry. Exact lookup of the full unique tuple needs no sort to establish uniqueness; final-field sort data remains useful for prefix queries such as `find({ category: "work" }).sort({ priority: 1 }).limit(2)`.
 
-The existing grouped index entry is the intended coordination point. Conditional persistence must make updates to that object safe across processes. Unique-index build/backfill remains a separate race and needs an explicit protocol to prevent concurrent writes bypassing validation/publication.
+The existing grouped index entry is the intended coordination point.
+Conditional persistence makes updates to that object safe across processes
+once those clients have loaded the index definition. Index definitions are
+cached per store and loaded only once. A client that loaded metadata before a
+unique index was created will not automatically discover that index and can
+continue writing without maintaining it.
+
+Unique-index creation must be done while collection writes are paused. After
+the build completes, restart or recreate every application store/client so
+each loads the new metadata before writes resume. A separate admin client is a
+reasonable way to run index maintenance, but it does not by itself coordinate
+with active application clients. Creating the index through the same
+`SengoCollection`/store is serialized with writes made through that store; it
+does not coordinate separate stores or processes. Online unique-index builds
+and automatic metadata refresh are not supported.
 
 See [INDEX-DESIGN.md](./INDEX-DESIGN.md) for shared, non-unique, and unique storage/query behavior.
 
@@ -267,7 +281,8 @@ conservatively block a future key; eliminating that crash window without a
 durable intent protocol is a known limitation. Do not silently claim full
 crash-atomicity across S3 objects. A cross-process reservation protocol must
 also distinguish a live pending claim from a stale one; it is not part of the
-single-process guarantee and is covered by skipped probes.
+supported write protocol and remains a separate recovery gap covered by an
+expected-failure probe.
 
 The collection/store boundary should own this sequencing. `SengoCollection`
 continues to validate the public call and produce the MongoDB-style result;
@@ -295,7 +310,8 @@ second pass cannot duplicate work. Do not publish unique metadata before
 validation/build completes. Within one store, pause writes to that collection
 while building/publishing to prevent a local write from slipping between the
 scan and activation. Independent-process build/write coordination remains
-unsupported and is covered by a skipped probe.
+unsupported; the required operational procedure is to pause writers during the
+build and recreate application stores before resuming them.
 
 ### Query/read path and S3 request budget
 
@@ -394,7 +410,7 @@ the write-cost/error instrumentation.
 - Non-unique duplicate behavior is unchanged.
 - Read request budgets and explicit no-scan assertions described above.
 
-**Cross-process probes (explicitly skipped until the feature supports them):**
+**Cross-process probes and known build limitation:**
 
 - Independent S3 clients racing to insert the same single-field tuple: exactly
   one winner and one `DuplicateKeyError`.
@@ -405,13 +421,13 @@ the write-cost/error instrumentation.
   reload/replay preserves both without a false duplicate.
 - Independent clients claiming the same tuple via update: at most one commits.
 - Independent clients writing distinct entry keys concurrently: both commit.
-- Unique index backfill racing a write: no duplicate can pass validation and
-  publication.
+- Unique index backfill racing a write: this remains an expected-failure
+  recovery-gap probe; callers must pause writes during index creation.
 
-Each skipped probe must contain its full assertions and arrange truly
-independent stores/index caches over one shared simulator. A single store with
-`Promise.all` is not a cross-process test. Keep these probes visible in test
-output and track the skipped count separately from passing tests.
+The runtime write probes use independent stores/index caches over one shared
+simulator. The build-race probe demonstrates the unsupported online-build case;
+it does not weaken the guarantee for writes made after clients have loaded an
+already-built index.
 
 ## Given / When / Then requirements
 
@@ -451,9 +467,8 @@ output and track the skipped count separately from passing tests.
    writes.
 6. Add deterministic request-budget tests for indexed reads and explicit scan
    rejection for writes; verify explain counters describe actual requests.
-7. Add the cross-process race probes as explicit skipped tests until their
-   guarantees are implemented; do not let skipped probes block the
-   single-process feature.
+7. Test cross-process writes to already-loaded unique indexes, and keep the
+   unsupported online-build race as an explicit expected-gap probe.
 8. Update supported-feature documentation and `/sengo` references; run
    focused tests, build/type checks, and full `npm test`. Compare against
    baseline and report passed, failed, and skipped counts.
@@ -465,9 +480,9 @@ tree. Add the supported cases as a new Vitest suite using the existing S3
 simulator, and target the actual `/data/` document prefix. Do not include
 `createIndex` backfill in ordinary-write request-budget tests: building a new
 index must enumerate existing documents, but subsequent ordinary writes must
-not scan the collection. Add the separate-process race cases above as skipped
-tests; a single client with `Promise.all` is not sufficient to validate
-process isolation.
+not scan the collection. Cross-process probes must use separate stores over a
+shared simulator; a single client with `Promise.all` is not sufficient to
+validate process isolation.
 
 Upsert and `$setOnInsert` tests remain outside this feature; they cover
 separate behavior.
