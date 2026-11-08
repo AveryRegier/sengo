@@ -26,6 +26,77 @@ function makeS3Collection(name: string) {
   };
 }
 
+function makeSharedS3Collections(name: string) {
+  const simulator = new S3BucketSimulator();
+  const stores = [
+    new S3CollectionStore<Account>(name, 'unique-index-test-bucket'),
+    new S3CollectionStore<Account>(name, 'unique-index-test-bucket'),
+  ];
+  const sends = stores.map(() => vi.fn(async (command: any) => simulator.handleCommand(command)));
+  stores.forEach((store, index) => {
+    store['s3'].send = sends[index] as any;
+  });
+  const collections = stores.map(store => new SengoCollection<Account>(name, store));
+
+  return {
+    simulator,
+    collections,
+    sends,
+    async loadIndexesOnBothClients() {
+      await Promise.all(collections.map(collection => collection.listIndexes()));
+      sends.forEach(send => send.mockClear());
+      simulator.clearLogs();
+    },
+    barrierIndexEntryReads(reads: number) {
+      let remaining = reads;
+      let arrivals = 0;
+      let round = createRound();
+
+      function createRound() {
+        let release!: () => void;
+        const promise = new Promise<void>(resolve => {
+          release = resolve;
+        });
+        return { promise, release };
+      }
+
+      const waitForRead = async (command: any) => {
+        const key: string = command.input.Key;
+        if (remaining === 0 || !key.includes('/indices/') || !key.endsWith('.json')) return;
+
+        const currentRound = round;
+        arrivals++;
+        if (arrivals === 2) {
+          arrivals = 0;
+          remaining = Math.max(0, remaining - 2);
+          currentRound.release();
+          if (remaining > 0) round = createRound();
+        }
+        await currentRound.promise;
+      };
+
+      sends.forEach(send => {
+        send.mockImplementation(async (command: any) => {
+          try {
+            const result = await simulator.handleCommand(command);
+            if (command.constructor.name === 'GetObjectCommand') await waitForRead(command);
+            return result;
+          } catch (error) {
+            if (command.constructor.name === 'GetObjectCommand') await waitForRead(command);
+            throw error;
+          }
+        });
+      });
+
+      return () => {
+        sends.forEach((send, index) => {
+          send.mockImplementation(async (command: any) => simulator.handleCommand(command));
+        });
+      };
+    },
+  };
+}
+
 describe('unique indexes', () => {
   it('rejects duplicate single-field values without storing the rejected document', async () => {
     const collection = makeCollection();
@@ -390,7 +461,7 @@ describe('unique indexes', () => {
     expect(simulator.getFile('unique-update-accounts/data/second.json')).toContain('two@example.test');
   });
 
-  it.skip('probes uniqueness across independent clients sharing one S3 bucket', async () => {
+  it('probes uniqueness across independent clients sharing one S3 bucket', async () => {
     const simulator = new S3BucketSimulator();
     const bucket = 'unique-cross-client-test-bucket';
     const firstStore = new S3CollectionStore<Account>('shared-accounts', bucket);
@@ -404,6 +475,8 @@ describe('unique indexes', () => {
     await firstClient.createIndex({ email: 1 }, { unique: true });
     await secondClient.listIndexes();
     simulator.clearLogs();
+    firstSend.mockClear();
+    secondSend.mockClear();
 
     const results = await Promise.allSettled([
       firstClient.insertOne({
@@ -428,5 +501,336 @@ describe('unique indexes', () => {
     expect(commands).not.toContain('ListObjectsV2Command');
     await firstStore.close();
     await secondStore.close();
+  });
+
+  it.fails('RECOVERY GAP: returns a duplicate-key error after stale unique-entry contention', async () => {
+    const shared = makeSharedS3Collections('unique-stale-race');
+    await shared.collections[0].createIndex({ email: 1 }, { unique: true });
+    await shared.loadIndexesOnBothClients();
+    const releaseReads = shared.barrierIndexEntryReads(4);
+
+    const writes = await Promise.allSettled(shared.collections.map((collection, index) =>
+      collection.insertOne({
+        _id: `stale-${index}`,
+        tenant: `tenant-${index}`,
+        handle: `handle-${index}`,
+        email: 'same@example.test',
+      }),
+    ));
+    releaseReads();
+
+    expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(1);
+    expect(writes.filter(write => write.status === 'rejected')).toHaveLength(1);
+    const writeCommands = shared.sends.flatMap(send => send.mock.calls);
+    expect(writeCommands.some(([command]) =>
+      command.constructor.name === 'ListObjectsV2Command',
+    )).toBe(false);
+    const docs = await shared.collections[0].find({ email: 'same@example.test' }).toArray();
+    expect(docs).toHaveLength(1);
+    expect(writes.find(write => write.status === 'rejected')).toMatchObject({
+      reason: { name: 'DuplicateKeyError', code: 11000 },
+    });
+  });
+
+  it('rejects concurrent duplicate full compound keys sharing one entry', async () => {
+    const shared = makeSharedS3Collections('unique-compound-race');
+    await shared.collections[0].createIndex({ tenant: 1, handle: 1 }, { unique: true });
+    await shared.loadIndexesOnBothClients();
+    const releaseReads = shared.barrierIndexEntryReads(4);
+
+    const writes = await Promise.allSettled(shared.collections.map((collection, index) =>
+      collection.insertOne({
+        _id: `compound-${index}`,
+        tenant: 'north',
+        handle: 'same',
+        email: `email-${index}@example.test`,
+      }),
+    ));
+    releaseReads();
+
+    expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(1);
+    expect(writes.filter(write => write.status === 'rejected')).toHaveLength(1);
+    expect((await shared.collections[0].find({ tenant: 'north', handle: 'same' }).toArray())).toHaveLength(1);
+  });
+
+  it('merges distinct compound tuples sharing a prefix entry', async () => {
+    const shared = makeSharedS3Collections('unique-compound-distinct-race');
+    await shared.collections[0].createIndex({ tenant: 1, handle: 1 }, { unique: true });
+    await shared.loadIndexesOnBothClients();
+    const releaseReads = shared.barrierIndexEntryReads(4);
+
+    const writes = await Promise.allSettled(shared.collections.map((collection, index) =>
+      collection.insertOne({
+        _id: `distinct-${index}`,
+        tenant: 'north',
+        handle: `handle-${index}`,
+        email: `${index}@example.test`,
+      }),
+    ));
+    releaseReads();
+
+    expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(2);
+    expect(await shared.collections[0].find({ tenant: 'north' }).toArray()).toHaveLength(2);
+  });
+
+  it('allows independent unique values in separate entry keys without listing', async () => {
+    const shared = makeSharedS3Collections('unique-distinct-entries-race');
+    await shared.collections[0].createIndex({ email: 1 }, { unique: true });
+    await shared.loadIndexesOnBothClients();
+
+    const writes = await Promise.all(shared.collections.map((collection, index) =>
+      collection.insertOne({
+        _id: `separate-${index}`,
+        tenant: `tenant-${index}`,
+        handle: `handle-${index}`,
+        email: `email-${index}@example.test`,
+      }),
+    ));
+
+    expect(writes).toHaveLength(2);
+    expect(shared.sends.flatMap(send => send.mock.calls).some(([command]) =>
+      command.constructor.name === 'ListObjectsV2Command',
+    )).toBe(false);
+    expect(await shared.collections[0].countDocuments({})).toBe(2);
+  });
+
+  it('rejects overlapping multikey memberships without discarding the winner memberships', async () => {
+    const shared = makeSharedS3Collections('unique-multikey-race');
+    await shared.collections[0].createIndex({ email: 1 }, { unique: true });
+    await shared.loadIndexesOnBothClients();
+    const releaseReads = shared.barrierIndexEntryReads(4);
+
+    const writes = await Promise.allSettled([
+      shared.collections[0].insertOne({
+        _id: 'multi-first',
+        tenant: 'north',
+        handle: 'first',
+        email: ['shared@example.test', 'first@example.test'],
+      }),
+      shared.collections[1].insertOne({
+        _id: 'multi-second',
+        tenant: 'south',
+        handle: 'second',
+        email: ['shared@example.test', 'second@example.test'],
+      }),
+    ]);
+    releaseReads();
+
+    expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(1);
+    expect(writes.filter(write => write.status === 'rejected')).toHaveLength(1);
+    const first = await shared.collections[0].find({ email: 'first@example.test' }).toArray();
+    const second = await shared.collections[0].find({ email: 'second@example.test' }).toArray();
+    expect(first.length + second.length).toBe(1);
+    expect(await shared.collections[0].find({ email: 'shared@example.test' }).toArray()).toHaveLength(1);
+  });
+
+  it('rolls back an earlier unique-index claim when a later unique index rejects the write', async () => {
+    const shared = makeSharedS3Collections('unique-multiple-index-race');
+    await shared.collections[0].createIndex({ email: 1 }, { unique: true });
+    await shared.collections[0].createIndex({ handle: 1 }, { unique: true });
+    await shared.loadIndexesOnBothClients();
+    const releaseReads = shared.barrierIndexEntryReads(4);
+
+    const writes = await Promise.allSettled([
+      shared.collections[0].insertOne({
+        _id: 'multi-index-first',
+        tenant: 'north',
+        handle: 'shared',
+        email: 'first@example.test',
+      }),
+      shared.collections[1].insertOne({
+        _id: 'multi-index-second',
+        tenant: 'south',
+        handle: 'shared',
+        email: 'second@example.test',
+      }),
+    ]);
+    releaseReads();
+    expect(writes.filter(write => write.status === 'fulfilled')).toHaveLength(1);
+    const loserIndex = writes[0].status === 'rejected' ? 0 : 1;
+    const loserEmail = loserIndex === 0 ? 'first@example.test' : 'second@example.test';
+
+    await expect(shared.collections[0].insertOne({
+      _id: 'rollback-check',
+      tenant: 'west',
+      handle: 'rollback-check',
+      email: loserEmail,
+    })).resolves.toMatchObject({ insertedId: 'rollback-check' });
+  });
+
+  it('allows only one of two independent clients to update to the same unique key', async () => {
+    const shared = makeSharedS3Collections('unique-update-race');
+    await shared.collections[0].createIndex({ email: 1 }, { unique: true });
+    await shared.collections[0].insertOne({
+      _id: 'update-first',
+      tenant: 'north',
+      handle: 'first',
+      email: 'first@example.test',
+    });
+    await shared.collections[0].insertOne({
+      _id: 'update-second',
+      tenant: 'south',
+      handle: 'second',
+      email: 'second@example.test',
+    });
+    await shared.loadIndexesOnBothClients();
+    const releaseReads = shared.barrierIndexEntryReads(4);
+
+    const updates = await Promise.allSettled([
+      shared.collections[0].updateOne({ _id: 'update-first' }, { $set: { email: 'shared@example.test' } }),
+      shared.collections[1].updateOne({ _id: 'update-second' }, { $set: { email: 'shared@example.test' } }),
+    ]);
+    releaseReads();
+
+    expect(updates.filter(update => update.status === 'fulfilled')).toHaveLength(1);
+    expect(updates.filter(update => update.status === 'rejected')).toHaveLength(1);
+    expect(await shared.collections[0].find({ email: 'shared@example.test' }).toArray()).toHaveLength(1);
+    const first = await shared.collections[0].findOne({ _id: 'update-first' });
+    const second = await shared.collections[0].findOne({ _id: 'update-second' });
+    expect([first?.email, second?.email].filter(email => email === 'shared@example.test')).toHaveLength(1);
+  });
+
+  it('keeps delete-versus-insert races unique and consistent with the final documents', async () => {
+    const shared = makeSharedS3Collections('unique-delete-insert-race');
+    await shared.collections[0].createIndex({ email: 1 }, { unique: true });
+    await shared.collections[0].insertOne({
+      _id: 'owner',
+      tenant: 'north',
+      handle: 'owner',
+      email: 'reusable@example.test',
+    });
+    await shared.loadIndexesOnBothClients();
+
+    const [deletion, insertion] = await Promise.allSettled([
+      shared.collections[0].deleteOne({ _id: 'owner' }),
+      shared.collections[1].insertOne({
+        _id: 'replacement',
+        tenant: 'south',
+        handle: 'replacement',
+        email: 'reusable@example.test',
+      }),
+    ]);
+
+    expect(deletion.status).toBe('fulfilled');
+    const matches = await shared.collections[0].find({ email: 'reusable@example.test' }).toArray();
+    if (insertion.status === 'fulfilled') {
+      expect(matches).toMatchObject([{ _id: 'replacement' }]);
+    } else {
+      expect(insertion.reason).toMatchObject({ name: 'DuplicateKeyError', code: 11000 });
+      expect(matches).toEqual([]);
+    }
+    await expect(shared.collections[0].findOne({ _id: 'owner' })).resolves.toBeNull();
+  });
+
+  it.fails('RECOVERY GAP: prevents an index build from missing a concurrent duplicate insert', async () => {
+    const { collection: builder, simulator } = makeS3Collection('unique-build-write-race');
+    await builder.insertOne({
+      _id: 'build-seed',
+      tenant: 'north',
+      handle: 'seed',
+      email: 'build@example.test',
+    });
+    const racingStore = new S3CollectionStore<Account>('unique-build-write-race', 'unique-index-test-bucket');
+    const racingSend = vi.fn(async (command: any) => simulator.handleCommand(command));
+    racingStore['s3'].send = racingSend as any;
+    const racingClient = new SengoCollection<Account>('unique-build-write-race', racingStore);
+
+    let releaseScan!: () => void;
+    let scanStarted!: () => void;
+    const scanReady = new Promise<void>(resolve => { scanStarted = resolve; });
+    const scanGate = new Promise<void>(resolve => { releaseScan = resolve; });
+    const builderSend = vi.fn(async (command: any) => {
+      const result = await simulator.handleCommand(command);
+      if (
+        command.constructor.name === 'ListObjectsV2Command' &&
+        command.input.Prefix === 'unique-build-write-race/data/'
+      ) {
+        scanStarted();
+        await scanGate;
+      }
+      return result;
+    });
+    builder.store['s3'].send = builderSend as any;
+
+    const creating = builder.createIndex({ email: 1 }, { unique: true });
+    await scanReady;
+    const racingInsert = await racingClient.insertOne({
+      _id: 'during-build',
+      tenant: 'south',
+      handle: 'racer',
+      email: 'build@example.test',
+    });
+    releaseScan();
+    await creating;
+
+    expect(racingInsert.insertedId).toBe('during-build');
+    const duplicates = Object.entries(simulator.dump())
+      .filter(([key]) => key.startsWith('unique-build-write-race/data/'))
+      .map(([, body]) => JSON.parse(body))
+      .filter(document => document.email === 'build@example.test');
+    expect(duplicates).toHaveLength(1);
+  });
+
+  it('releases a claimed key when a definite document write failure occurs', async () => {
+    const { collection, simulator, send } = makeS3Collection('unique-definite-write-failure');
+    await collection.createIndex({ email: 1 }, { unique: true });
+    let failDocumentWrite = true;
+    send.mockImplementation(async (command: any) => {
+      if (
+        failDocumentWrite &&
+        command.constructor.name === 'PutObjectCommand' &&
+        command.input.Key === 'unique-definite-write-failure/data/failed.json'
+      ) {
+        failDocumentWrite = false;
+        throw new Error('injected definite document write failure');
+      }
+      return simulator.handleCommand(command);
+    });
+
+    await expect(collection.insertOne({
+      _id: 'failed',
+      tenant: 'north',
+      handle: 'failed',
+      email: 'retry@example.test',
+    })).rejects.toThrow('injected definite document write failure');
+
+    await expect(collection.insertOne({
+      _id: 'retry',
+      tenant: 'south',
+      handle: 'retry',
+      email: 'retry@example.test',
+    })).resolves.toMatchObject({ insertedId: 'retry' });
+    expect(simulator.getFile('unique-definite-write-failure/data/failed.json')).toBeUndefined();
+  });
+
+  it.fails('RECOVERY GAP: detects a document write that succeeded remotely but timed out locally', async () => {
+    const { collection, simulator, send } = makeS3Collection('unique-ambiguous-write-failure');
+    await collection.createIndex({ email: 1 }, { unique: true });
+    let timeoutAfterWrite = true;
+    send.mockImplementation(async (command: any) => {
+      const result = await simulator.handleCommand(command);
+      if (
+        timeoutAfterWrite &&
+        command.constructor.name === 'PutObjectCommand' &&
+        command.input.Key === 'unique-ambiguous-write-failure/data/first.json'
+      ) {
+        timeoutAfterWrite = false;
+        throw Object.assign(new Error('injected response timeout after remote write'), { name: 'TimeoutError' });
+      }
+      return result;
+    });
+
+    await expect(collection.insertOne({
+      _id: 'first',
+      tenant: 'north',
+      handle: 'first',
+      email: 'ambiguous@example.test',
+    })).rejects.toThrow();
+    await expect(collection.insertOne({
+      _id: 'second',
+      tenant: 'south',
+      handle: 'second',
+      email: 'ambiguous@example.test',
+    })).rejects.toMatchObject({ name: 'DuplicateKeyError', code: 11000 });
   });
 });
