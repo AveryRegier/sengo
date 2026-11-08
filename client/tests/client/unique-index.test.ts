@@ -278,6 +278,45 @@ describe('unique indexes', () => {
     expect(unique.send.mock.calls.map(([command]) => command.constructor.name)).not.toContain('ListObjectsV2Command');
   });
 
+  it('uses a unique compound index for sort and limit 1 without scanning the collection', async () => {
+    const { collection, simulator, send } = makeS3Collection('unique-sort-limit-accounts');
+    await collection.createIndex({ tenant: 1, handle: 1 }, { unique: true });
+    await collection.insertOne({
+      _id: 'last',
+      tenant: 'north',
+      handle: 'zulu',
+      email: 'last@example.test',
+    });
+    await collection.insertOne({
+      _id: 'first',
+      tenant: 'north',
+      handle: 'alpha',
+      email: 'first@example.test',
+    });
+    await collection.insertOne({
+      _id: 'other-tenant',
+      tenant: 'south',
+      handle: 'aardvark',
+      email: 'other@example.test',
+    });
+    send.mockClear();
+    simulator.clearLogs();
+
+    await expect(
+      collection.find({ tenant: 'north' }, { sort: { handle: 1 }, limit: 1 }).toArray(),
+    ).resolves.toMatchObject([{ _id: 'first', handle: 'alpha' }]);
+
+    const commands = send.mock.calls.map(([command]) => command.constructor.name);
+    expect(commands).not.toContain('ListObjectsV2Command');
+    expect(simulator.getLogs().some(log => log.command === 'listObjectsV2')).toBe(false);
+    expect(simulator.getLogs().filter(log =>
+      log.command === 'getObject' && log.key.includes('/data/'),
+    )).toHaveLength(1);
+    expect(simulator.getLogs().filter(log =>
+      log.key.startsWith('unique-sort-limit-accounts/indices/tenant_1_handle_1/'),
+    )).toHaveLength(1);
+  });
+
   it('does not publish unique index metadata when backfill detects duplicates', async () => {
     const { collection, simulator } = makeS3Collection('unique-build-accounts');
     await collection.insertOne({
