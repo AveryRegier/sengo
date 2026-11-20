@@ -1,6 +1,6 @@
 ---
 name: sengo
-description: 'Create valid Sengo client code for insertOne/find/findOne/countDocuments/updateOne/deleteOne/createIndex/dropIndex/listIndexes. Use when generating MongoDB-like queries and updates that must actually work in Sengo (supported operators, sort, limit, count, $set). For explain-plan diagnosis and index tuning, use the sengo-explain-optimizer subskill.'
+description: 'Create valid Sengo client code for insertOne/find/findOne/countDocuments/updateOne/updateMany/deleteOne/createIndex/dropIndex/listIndexes. Use when generating MongoDB-like queries and updates that must actually work in Sengo (supported operators, sort, limit, count, $set). For explain-plan diagnosis and index tuning, use the sengo-explain-optimizer subskill.'
 argument-hint: 'What operation do you need (insert, find, update, delete, index), and what schema/fields are involved?'
 ---
 
@@ -35,6 +35,7 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
 - `collection.findOne(query, options?)`
 - `collection.countDocuments(filter?, options?)`
 - `collection.updateOne(filter, update, options?)`
+- `collection.updateMany(filter, update, options?)`
 - `collection.deleteOne(filter)`
 - `collection.createIndex(keys)`
 - `collection.dropIndex(name)`
@@ -60,6 +61,11 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
 - `updateOne(filter, update, options?)`
   - update document supports `$set` and `$setOnInsert`
   - `options.upsert` inserts when no document matches
+  - `options.explain` reports write costs
+- `updateMany(filter, update, options?)`
+  - update document supports `$set`; `$setOnInsert` applies only when `{ upsert: true }` inserts
+  - updates every matching document
+  - `options.upsert` inserts one document when no document matches
   - `options.explain` reports write costs
 - `createIndex(keys)`
   - `string` key name
@@ -87,7 +93,7 @@ write cannot be verified, and that S3 claim does not expire automatically.
 
 ## Procedure
 1. Identify intent
-- Classify request as insert, find, findOne, updateOne, deleteOne, index management, or mixed workflow.
+- Classify request as insert, find, findOne, updateOne, updateMany, deleteOne, index management, or mixed workflow.
 
 2. Validate requested syntax against Sengo support
 - Reject/replace unsupported operators and options.
@@ -101,6 +107,7 @@ write cannot be verified, and that S3 claim does not expire automatically.
 - Add `sort` and/or `limit` only on `find`/`findOne`.
 - For `findOne`, keep in mind effective result count is always 1.
 - For `countDocuments`, use `skip`/`limit` only when the caller wants count windowing.
+- For `updateMany`, use `upsert` only when one insert is intended if no documents match.
 
 5. Add index calls when relevant
 - Add `createIndex` for repeated fields used in filtering/sorting.
@@ -163,6 +170,14 @@ const pagedCount = await collection.countDocuments(
 const updateResult = await collection.updateOne(
   { _id: 'abc123' },
   { $set: { status: 'completed', updatedAt: new Date().toISOString() } }
+);
+```
+
+### UpdateMany with $set
+```ts
+const updateResult = await collection.updateMany(
+  { status: 'pending' },
+  { $set: { status: 'active' } }
 );
 ```
 

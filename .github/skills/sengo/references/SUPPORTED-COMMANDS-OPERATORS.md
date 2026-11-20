@@ -10,6 +10,7 @@ This reference is scoped to code generation for Sengo client users.
 - `collection.find(query, options?)`
 - `collection.findOne(query, options?)`
 - `collection.updateOne(filter, update, options?)`
+- `collection.updateMany(filter, update, options?)`
 - `collection.deleteOne(filter)`
 - `collection.createIndex(keys)`
 - `collection.dropIndex(name)`
@@ -38,6 +39,10 @@ This reference is scoped to code generation for Sengo client users.
 - `updateOne(filter, update, options?)`
   - `options.upsert: true` inserts a document when no document matches; omitted/false does not insert.
   - `options.explain`
+- `updateMany(filter, update, options?)`
+  - Updates every matching document with `$set`.
+  - `options.upsert: true` inserts one document when no document matches; `$setOnInsert` applies only to that insert.
+  - `options.explain`
 
 Upsert syntax:
 
@@ -53,6 +58,16 @@ await collection.updateOne(
 ```
 
 `$setOnInsert` applies only when the upsert creates a document.
+
+`updateMany` returns `matchedCount`, `modifiedCount`, `upsertedCount`, and
+`upsertedId`:
+
+```ts
+await collection.updateMany(
+  { status: 'pending' },
+  { $set: { status: 'active' } }
+);
+```
 
 ## Important Notes
 

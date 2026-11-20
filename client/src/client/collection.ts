@@ -1,6 +1,7 @@
 import { MongoClientClosedError, MongoServerError, MongoWriteOutcomeUnknownError, DuplicateKeyError, PreconditionFailedError } from '../errors.js';
 import { CandidateLoadDocuments, normalizeIndexKeys, type CollectionIndex, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
+import { isDeepStrictEqual } from 'node:util';
 import { CreateIndexOptions, FindCursor, IndexDefinition, WithId } from '../types';
 import { getLogger } from './logger';
 import logger, { Follower } from 'clox';
@@ -101,6 +102,41 @@ export class SengoCollection<T> {
     }
 
     return indexNames;
+  }
+
+  private validateUpdateDocument(update: Record<string, any>): void {
+    const supportedOperators = ['$set', '$setOnInsert'];
+    const updateOperators = Object.keys(update);
+    if (
+      updateOperators.length === 0 ||
+      updateOperators.some(operator => !supportedOperators.includes(operator))
+    ) {
+      const err = new MongoServerError(`Update document must contain supported update operators (${supportedOperators.join(', ')}). Full document replacement is not yet supported.`);
+      err.code = 9;
+      throw err;
+    }
+  }
+
+  private createUpsertDocument(filter: Record<string, any>, update: Record<string, any>): Record<string, any> {
+    const upsertDocument: Record<string, any> = {};
+    for (const [field, value] of Object.entries(filter)) {
+      if (field.startsWith('$')) continue;
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const operators = Object.keys(value).filter(key => key.startsWith('$'));
+        if (operators.length > 0) {
+          if (operators.length === 1 && operators[0] === '$eq') {
+            upsertDocument[field] = value.$eq;
+          }
+          continue;
+        }
+      }
+      upsertDocument[field] = value;
+    }
+    Object.assign(upsertDocument, update.$set, update.$setOnInsert);
+    if (upsertDocument._id === undefined) {
+      upsertDocument._id = new ObjectId().toString();
+    }
+    return upsertDocument;
   }
 
   /**
@@ -419,39 +455,14 @@ export class SengoCollection<T> {
     const logger = getLogger();
     
     try {
-      const supportedOperators = ['$set', '$setOnInsert'];
-      const updateOperators = Object.keys(update);
-      if (
-        updateOperators.length === 0 ||
-        updateOperators.some(operator => !supportedOperators.includes(operator))
-      ) {
-        const err = new MongoServerError(`Update document must contain supported update operators (${supportedOperators.join(', ')}). Full document replacement is not yet supported.`);
-        err.code = 9; // MongoDB's FailedToParse
-        throw err;
-      }
+      this.validateUpdateDocument(update);
 
       const outcome = await serializeStoreWrite(this.store, async () => {
         const docs = await this.find(filter).toArray();
         if (!docs.length) {
           if (!options?.upsert) return null;
 
-          const upsertDocument: Record<string, any> = {};
-          for (const [field, value] of Object.entries(filter)) {
-            if (field.startsWith('$')) continue;
-            if (
-              value !== null &&
-              typeof value === 'object' &&
-              !Array.isArray(value) &&
-              Object.keys(value).some(key => key.startsWith('$'))
-            ) {
-              continue;
-            }
-            upsertDocument[field] = value;
-          }
-          Object.assign(upsertDocument, update.$set, update.$setOnInsert);
-          if (upsertDocument._id === undefined) {
-            upsertDocument._id = new ObjectId().toString();
-          }
+          const upsertDocument = this.createUpsertDocument(filter, update);
 
           const indexNames = await this.insertDocument(upsertDocument as WithId<T>);
           return { upsertedId: upsertDocument._id, indexNames };
@@ -529,6 +540,129 @@ export class SengoCollection<T> {
 
       const result = { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
       sink.onWriteCost(1, 0, outcome.indexNames.length, outcome.indexNames, 0);
+      sink.onOpEnd(true, Date.now() - startMs);
+      return sink.finalize(result) ?? result;
+    } catch (error) {
+      sink.onOpEnd(false, Date.now() - startMs);
+      throw error;
+    }
+  }
+
+  async updateMany(filter: Record<string, any>, update: Record<string, any>, options?: UpdateOptions) {
+    const sink = createExplainSink({
+      opType: 'updateMany',
+      namespace: this.name,
+      verbosity: options?.explain,
+      hasSort: false,
+      hasLimit: false,
+      collectionName: this.name,
+    });
+    const startMs = Date.now();
+
+    try {
+      this.validateUpdateDocument(update);
+      const outcome = await serializeStoreWrite(this.store, async () => {
+        const docs = await this.find(filter).toArray();
+        if (docs.length === 0) {
+          if (!options?.upsert) {
+            return { matchedCount: 0, modifiedCount: 0, upsertedId: null, documentWrites: 0, indexNames: [], indexEntryUpdatesCount: 0 };
+          }
+
+          const upsertDocument = this.createUpsertDocument(filter, update);
+          const indexNames = await this.insertDocument(upsertDocument as WithId<T>);
+          return {
+            matchedCount: 0,
+            modifiedCount: 0,
+            upsertedId: upsertDocument._id,
+            documentWrites: 1,
+            indexNames,
+            indexEntryUpdatesCount: indexNames.length,
+          };
+        }
+
+        const indexes = await this.store.getIndexes();
+        let matchedCount = 0;
+        let modifiedCount = 0;
+        let indexEntryUpdatesCount = 0;
+        const updatedIndexNames = new Set<string>();
+
+        for (const doc of docs) {
+          const applyUpdate = (current: WithId<Record<string, any>>) => ({
+            ...current,
+            ...update.$set,
+          });
+          const updatedDoc = applyUpdate(doc);
+          if (isDeepStrictEqual(doc, updatedDoc)) {
+            matchedCount += 1;
+            continue;
+          }
+
+          const validateFilter = (current: WithId<Record<string, any>>) =>
+            this.docMatchesFilter(current, filter);
+          const claimedUniqueIndexes: CollectionIndex[] = [];
+
+          try {
+            for (const index of indexes.values()) {
+              if (index.unique && !index.hasSameUniqueKey(doc, updatedDoc)) {
+                await index.addDocument(updatedDoc);
+                claimedUniqueIndexes.push(index);
+              }
+            }
+            await this.store.updateOne(doc._id, applyUpdate as any, validateFilter as any);
+          } catch (error) {
+            const cleanupErrors: unknown[] = [];
+            for (const index of claimedUniqueIndexes.reverse()) {
+              try {
+                await index.updateIndexOnDocumentUpdate(updatedDoc, doc);
+              } catch (cleanupError) {
+                cleanupErrors.push(cleanupError);
+              }
+            }
+            if (cleanupErrors.length > 0) {
+              throw new MongoServerError(
+                `Update failed and ${cleanupErrors.length} unique index claim(s) could not be rolled back`,
+                { cause: error instanceof Error ? error : new Error(String(error)) },
+              );
+            }
+            if (error instanceof Error && error.message.includes('does not match filter after reload')) {
+              continue;
+            }
+            throw error;
+          }
+
+          matchedCount += 1;
+          modifiedCount += 1;
+          for (const [name, index] of indexes) {
+            updatedIndexNames.add(name);
+            await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+            indexEntryUpdatesCount += 1;
+          }
+        }
+
+        return {
+          matchedCount,
+          modifiedCount,
+          upsertedId: null,
+          documentWrites: modifiedCount,
+          indexNames: Array.from(updatedIndexNames),
+          indexEntryUpdatesCount,
+        };
+      });
+
+      const result = {
+        acknowledged: true,
+        matchedCount: outcome.matchedCount,
+        modifiedCount: outcome.modifiedCount,
+        upsertedCount: outcome.upsertedId === null ? 0 : 1,
+        upsertedId: outcome.upsertedId,
+      };
+      sink.onWriteCost(
+        outcome.documentWrites,
+        0,
+        outcome.indexEntryUpdatesCount,
+        outcome.indexNames,
+        0,
+      );
       sink.onOpEnd(true, Date.now() - startMs);
       return sink.finalize(result) ?? result;
     } catch (error) {

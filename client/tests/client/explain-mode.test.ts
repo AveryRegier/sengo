@@ -270,6 +270,18 @@ describe('explain mode', () => {
     expect(result.writeStats.indexEntryUpdatesCount).toBeGreaterThanOrEqual(2);
   });
 
+  it('captures explain write costs for updateMany', async () => {
+    const result = await collection.updateMany(
+      { status: 'active' },
+      { $set: { priority: 8 } },
+      { explain: 'executionStats' },
+    ) as any;
+
+    expect(result.command.type).toBe('updateMany');
+    expect(result.result).toMatchObject({ matchedCount: 2, modifiedCount: 2 });
+    expect(result.writeStats.documentWrites).toBe(2);
+  });
+
   it('records richer per-index write-file detail with exact file paths and mutation counts', async () => {
     await collection.createIndex({ priority: 1 });
 

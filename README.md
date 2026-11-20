@@ -76,6 +76,7 @@ What you can do today:
 - Query documents with `find` and `findOne`
 - Count matching documents with `countDocuments`
 - Update a single document with `updateOne` using `$set`
+- Update all matching documents with `updateMany` using `$set`
 - Delete a single document with `deleteOne`
 - Create, list, and drop indexes with `createIndex`, `listIndexes`, and `dropIndex`
 - Sort and limit query results using query options
@@ -92,7 +93,7 @@ Important behavior notes:
 - `findOne` always returns at most one document.
 - `countDocuments` returns an accurate count for a filter and supports `skip`/`limit` options.
 - `countDocuments` supports `explain` and returns explain output when requested.
-- `updateOne` currently supports `$set` style updates.
+- `updateOne` and `updateMany` support `$set` style updates.
 
 ### Generic Query Examples
 
@@ -151,6 +152,12 @@ const countExplain = await orders.countDocuments(
 await orders.updateOne(
    { customerId: 'cust-123', status: 'new' },
    { $set: { status: 'processing' } }
+);
+
+// Update every matching document with $set
+await orders.updateMany(
+   { status: 'processing' },
+   { $set: { status: 'shipped' } }
 );
 
 // Delete one

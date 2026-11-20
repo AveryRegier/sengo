@@ -1,8 +1,8 @@
 # Skill Version
 
 - Name: `sengo`
-- Version: `0.1.0`
-- Updated: `2026-04-24`
+- Version: `0.2.0`
+- Updated: `2026-11-19`
 
 ## Update Policy
 
@@ -18,6 +18,7 @@
    - insert
    - find/findOne with sort/limit
    - updateOne with `$set`
+   - updateMany with `$set`
    - index recommendations
 
 ## Compatibility Note

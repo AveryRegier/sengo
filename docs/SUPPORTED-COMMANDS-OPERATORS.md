@@ -29,6 +29,7 @@ Supported operations with explain:
 - `countDocuments(filter?, { explain: '...' })`
 - `insertOne(doc, { explain: '...' })`
 - `updateOne(filter, update, { explain: '...' })`
+- `updateMany(filter, update, { explain: '...' })`
 - `deleteOne(filter, { explain: '...' })`
 
 The explain result is shaped as a MongoDB-like object with `queryPlanner`, `executionStats`, and `writeStats` sections when applicable.
@@ -105,6 +106,15 @@ This section lists options supported by each client command, including commands 
   - Tests:
     - updateOne by _id in [client/tests/client/updateOne-byId.test.ts](../client/tests/client/updateOne-byId.test.ts#L16)
     - upsert and $setOnInsert in [client/tests/sengo-test-future-phases/upsert.test.ts](../client/tests/sengo-test-future-phases/upsert.test.ts#L1)
+- SengoCollection.updateMany(filter, update, options?)
+  - Supported options/args:
+    - filter required
+    - update required; `$set` supported
+    - options.upsert inserts one document when no document matches; `$setOnInsert` applies only to that insert
+    - options.explain supports queryPlanner, executionStats, and allPlansExecution
+  - Results include `acknowledged`, `matchedCount`, `modifiedCount`, `upsertedCount`, and `upsertedId`
+  - Implementation: [client/src/client/collection.ts](../client/src/client/collection.ts)
+  - Tests: [client/tests/client/updateMany.test.ts](../client/tests/client/updateMany.test.ts)
 - SengoCollection.deleteOne(filter)
   - Supported options/args: required filter only
   - Implementation: [client/src/client/collection.ts](../client/src/client/collection.ts#L129)
@@ -239,8 +249,8 @@ These fields are the contract the AI skill should use when deciding whether a qu
 ## Update Operators
 
 - $set
-  - Implementation: update.$set branch in [client/src/client/collection.ts](../client/src/client/collection.ts#L106)
-  - Test: $set update in [client/tests/client/updateOne-byId.test.ts](../client/tests/client/updateOne-byId.test.ts#L16)
+  - Implementation: update.$set handling in [client/src/client/collection.ts](../client/src/client/collection.ts)
+  - Tests: updateOne in [client/tests/client/updateOne-byId.test.ts](../client/tests/client/updateOne-byId.test.ts#L16), updateMany in [client/tests/client/updateMany.test.ts](../client/tests/client/updateMany.test.ts)
 
 Current limitation:
 

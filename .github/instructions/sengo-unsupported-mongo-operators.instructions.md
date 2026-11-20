@@ -14,10 +14,11 @@ For generated Sengo client code, validate operator and command support before fi
 
 ## Allowed Update Operators
 - `$set`
-- `$setOnInsert` with `updateOne(..., { upsert: true })`
+- `$setOnInsert` with `updateOne(..., { upsert: true })` or `updateMany(..., { upsert: true })`
 
 ## Allowed Update Options
 - `updateOne(filter, update, { upsert, explain })`
+- `updateMany(filter, update, { upsert, explain })`
 
 ## Allowed Query Options
 - `find(..., { sort, limit })`

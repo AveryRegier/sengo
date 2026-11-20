@@ -151,6 +151,11 @@ Update one document using `$set`:
 sengo> updateOne {"_id": "12345"} {"$set": {"status": "completed", "updatedAt": "2026-10-24T15:00:00Z"}}
 ```
 
+Update all matching documents using `$set`:
+```
+sengo> updateMany {"status": "pending"} {"$set": {"status": "active"}}
+```
+
 Returns:
 ```json
 {
@@ -284,7 +289,7 @@ Output includes:
 - `docsExamined` vs. `docsReturned` shows filtering efficiency.
 - Queries with `docsExamined >> docsReturned` benefit from better indexes or tighter filters.
 
-**Write Cost** (for insertOne, updateOne, deleteOne with explain)
+**Write Cost** (for insertOne, updateOne, updateMany, deleteOne with explain)
 - `writeStats` shows how many index entry files were updated.
 - More indexes = higher write cost; balance against read benefits.
 

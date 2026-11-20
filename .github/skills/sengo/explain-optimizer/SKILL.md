@@ -29,7 +29,7 @@ Use these as the hard boundaries for what is valid in Sengo:
 Check the query shape before trusting the explain result.
 
 Do these checks first:
-- Confirm the command exists in Sengo: `find`, `findOne`, `countDocuments`, `insertOne`, `updateOne`, `deleteOne`, `createIndex`, etc.
+- Confirm the command exists in Sengo: `find`, `findOne`, `countDocuments`, `insertOne`, `updateOne`, `updateMany`, `deleteOne`, `createIndex`, etc.
 - Confirm each operator is in the supported list:
   - allowed query operators: `$or`, `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$nin`, `$exists`
   - direct equality such as `{ status: 'active' }`
