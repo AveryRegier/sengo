@@ -46,4 +46,25 @@ describe('Sengo Shell exit/quit commands', () => {
       expect(output).not.toMatch(/Unknown command or method/);
     });
   }
+
+  it('lists only public collection methods after selecting a collection', async () => {
+    const { output, code } = await runShell(['connect memory', 'use foo', 'help']);
+    expect(code).toBe(0);
+    const methodsSection = output.split('Collection methods:')[1];
+    expect(methodsSection).toBeDefined();
+    const methods = Array.from(methodsSection.matchAll(/^  (\w+)\r?$/gm), match => match[1]);
+    expect(methods).toEqual([
+      'countDocuments',
+      'createIndex',
+      'deleteOne',
+      'dropIndex',
+      'find',
+      'findOne',
+      'insertMany',
+      'insertOne',
+      'listIndexes',
+      'updateMany',
+      'updateOne',
+    ]);
+  });
 });

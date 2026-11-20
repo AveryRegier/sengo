@@ -1,28 +1,24 @@
+import type { SengoCollection } from 'sengo';
 import type { SengoShell } from '../index.js';
 
-function getPublicMethodNames(instance: unknown): string[] {
-  if (!instance || (typeof instance !== 'object' && typeof instance !== 'function')) {
-    return [];
-  }
+type Collection = SengoCollection<unknown>;
+type CollectionMethod = {
+  [K in keyof Collection]: Collection[K] extends (...args: never[]) => unknown ? K : never
+}[keyof Collection];
 
-  const names = new Set<string>();
-  let proto = Object.getPrototypeOf(instance);
-
-  // Walk the full prototype chain to support wrapped/proxied class instances.
-  while (proto && proto !== Object.prototype) {
-    for (const name of Object.getOwnPropertyNames(proto)) {
-      if (name === 'constructor' || name.startsWith('_')) {
-        continue;
-      }
-      if (typeof (instance as Record<string, unknown>)[name] === 'function') {
-        names.add(name);
-      }
-    }
-    proto = Object.getPrototypeOf(proto);
-  }
-
-  return Array.from(names).sort((a, b) => a.localeCompare(b));
-}
+const collectionMethods: Record<CollectionMethod, true> = {
+  countDocuments: true,
+  createIndex: true,
+  deleteOne: true,
+  dropIndex: true,
+  find: true,
+  findOne: true,
+  insertMany: true,
+  insertOne: true,
+  listIndexes: true,
+  updateMany: true,
+  updateOne: true,
+};
 
 function rightPad(value: string, width: number): string {
   if (value.length >= width) {
@@ -48,9 +44,10 @@ export class HelpCommand {
         console.log(`  ${rightPad(cmdName, 8)} - ${cmd.description}`);
       }
     }
-    // Show dynamic collection methods if a collection is selected
     if (shell.currentCollection) {
-      const methodNames = getPublicMethodNames(shell.currentCollection);
+      const methodNames = Object.keys(collectionMethods)
+        .filter(name => typeof shell.currentCollection?.[name as CollectionMethod] === 'function')
+        .sort((a, b) => a.localeCompare(b));
       if (methodNames.length) {
         console.log('\nCollection methods:');
         for (const name of methodNames) {

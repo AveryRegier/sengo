@@ -108,6 +108,8 @@ sengo
 
 This starts the shell and lets you connect to a memory or S3-backed repository, run commands, and interact with your data.
 
+Run `help` to list shell commands. After selecting a collection with `use`, help also lists its public methods.
+
 ---
 
 For more details, see the main README or the client package documentation.
