@@ -36,8 +36,23 @@ This reference is scoped to code generation for Sengo client users.
   - `options.sort`
   - `options.limit` accepted, but effective limit is always 1.
 - `updateOne(filter, update, options?)`
-  - `options.upsert`
+  - `options.upsert: true` inserts a document when no document matches; omitted/false does not insert.
   - `options.explain`
+
+Upsert syntax:
+
+```ts
+await collection.updateOne(
+  { email: 'person@example.com' },
+  {
+    $set: { status: 'active' },
+    $setOnInsert: { createdAt: new Date().toISOString() }
+  },
+  { upsert: true }
+);
+```
+
+`$setOnInsert` applies only when the upsert creates a document.
 
 ## Important Notes
 
