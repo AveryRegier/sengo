@@ -7,6 +7,7 @@ This reference is scoped to code generation for Sengo client users.
 - `client.db(dbName?)`
 - `db.collection(name)`
 - `collection.insertOne(doc)`
+- `collection.insertMany(documents, options?)`
 - `collection.find(query, options?)`
 - `collection.findOne(query, options?)`
 - `collection.updateOne(filter, update, options?)`
@@ -30,6 +31,10 @@ This reference is scoped to code generation for Sengo client users.
 
 ## Supported Options
 
+- `insertMany(documents, options?)`
+  - `documents` must be a non-empty array
+  - `options.ordered` defaults to `true`; `false` continues after duplicate-key errors
+  - `options.explain`
 - `find(query, options?)`
   - `options.sort`
   - `options.limit`
@@ -58,6 +63,10 @@ await collection.updateOne(
 ```
 
 `$setOnInsert` applies only when the upsert creates a document.
+
+Successful `insertMany` results include `acknowledged`, `insertedCount`, and
+`insertedIds` keyed by input index. Duplicate-key failures throw
+`MongoBulkWriteError` with error indexes and partial result.
 
 `updateMany` returns `matchedCount`, `modifiedCount`, `upsertedCount`, and
 `upsertedId`:

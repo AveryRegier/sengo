@@ -32,6 +32,13 @@ const collection = client.db().collection('animals');
 const insertResult = await collection.insertOne({ name: 'fuzzy', kind: 'cat' });
 console.log('Inserted ID:', insertResult.insertedId);
 
+// Insert multiple documents
+const bulkInsertResult = await collection.insertMany([
+  { name: 'Milo', kind: 'cat' },
+  { name: 'Pippin', kind: 'rabbit' },
+]);
+console.log('Inserted count:', bulkInsertResult.insertedCount);
+
 // Find a document by _id
 const found = await collection.find({ _id: insertResult.insertedId });
 console.log('Found:', found);

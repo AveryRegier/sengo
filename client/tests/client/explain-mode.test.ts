@@ -249,6 +249,17 @@ describe('explain mode', () => {
     expect(result.writeStats.documentWrites).toBeGreaterThanOrEqual(1);
   });
 
+  it('captures explain write costs for insertMany', async () => {
+    const result = await collection.insertMany([
+      { status: 'queued', priority: 3 },
+      { status: 'queued', priority: 4 },
+    ], { explain: 'executionStats' }) as any;
+
+    expect(result.command.type).toBe('insertMany');
+    expect(result.result.insertedCount).toBe(2);
+    expect(result.writeStats.documentWrites).toBe(2);
+  });
+
   it('records write cost per updated index file', async () => {
     await collection.createIndex({ priority: 1 });
 

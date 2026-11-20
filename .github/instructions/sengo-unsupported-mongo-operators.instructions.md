@@ -20,6 +20,9 @@ For generated Sengo client code, validate operator and command support before fi
 - `updateOne(filter, update, { upsert, explain })`
 - `updateMany(filter, update, { upsert, explain })`
 
+## Allowed Insert Options
+- `insertMany(documents, { ordered, explain })`
+
 ## Allowed Query Options
 - `find(..., { sort, limit })`
 - `findOne(..., { sort })` and note that Sengo forces `limit: 1` internally
@@ -35,7 +38,7 @@ For generated Sengo client code, validate operator and command support before fi
 - Aggregation pipeline stages (`$match`, `$group`, `$project`, `$lookup`, etc.)
 - Unsupported logical/query operators (`$and`, `$nor`, `$not`, `$regex`, `$elemMatch`, `$all`, `$size`, `$type`, `$expr`, etc.)
 - Unsupported update operators (`$unset`, `$inc`, `$push`, `$pull`, `$addToSet`, etc.)
-- Bulk write APIs and transactions
+- `bulkWrite` and transactions
 
 ## Source References
 - Query/command support: [docs/SUPPORTED-COMMANDS-OPERATORS.md](../../docs/SUPPORTED-COMMANDS-OPERATORS.md)

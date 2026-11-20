@@ -1,4 +1,4 @@
-import { MongoClientClosedError, MongoServerError, MongoWriteOutcomeUnknownError, DuplicateKeyError, PreconditionFailedError } from '../errors.js';
+import { MongoBulkWriteError, MongoClientClosedError, MongoInvalidArgumentError, MongoServerError, MongoWriteOutcomeUnknownError, DuplicateKeyError, PreconditionFailedError, type MongoBulkWriteErrorEntry } from '../errors.js';
 import { CandidateLoadDocuments, normalizeIndexKeys, type CollectionIndex, type CollectionStore } from '../repository/index';
 import { ObjectId } from 'bson';
 import { isDeepStrictEqual } from 'node:util';
@@ -25,6 +25,17 @@ export type CountDocumentsOptions = {
 export type UpdateOptions = {
   upsert?: boolean;
   explain?: ExplainVerbosity;
+};
+
+export type InsertManyOptions = {
+  ordered?: boolean;
+  explain?: ExplainVerbosity;
+};
+
+export type InsertManyResult = {
+  acknowledged: true;
+  insertedCount: number;
+  insertedIds: Record<number, unknown>;
 };
 
 const storeWriteQueues = new WeakMap<object, Promise<void>>();
@@ -189,6 +200,103 @@ export class SengoCollection<T> {
       const indexNames = await serializeStoreWrite(this.store, () => this.insertDocument(docWithId as WithId<T>));
       const result = { acknowledged: true, insertedId: docWithId._id };
       sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      sink.onOpEnd(true, Date.now() - startMs);
+      return sink.finalize(result) ?? result;
+    } catch (error) {
+      sink.onOpEnd(false, Date.now() - startMs);
+      throw error;
+    }
+  }
+
+  insertMany(
+    documents: Record<string, any>[],
+    options: InsertManyOptions & { explain: ExplainVerbosity },
+  ): Promise<ExplainResult<InsertManyResult>>;
+  insertMany(documents: Record<string, any>[], options?: InsertManyOptions): Promise<InsertManyResult>;
+  async insertMany(
+    documents: Record<string, any>[],
+    options?: InsertManyOptions,
+  ): Promise<InsertManyResult | ExplainResult<InsertManyResult>> {
+    const sink = createExplainSink({
+      opType: 'insertMany',
+      namespace: this.name,
+      verbosity: options?.explain,
+      hasSort: false,
+      hasLimit: false,
+      collectionName: this.name,
+    });
+    const startMs = Date.now();
+
+    try {
+      if (this.store.isClosed()) {
+        throw new MongoClientClosedError('Store is closed');
+      }
+      if (!Array.isArray(documents) || documents.length === 0) {
+        throw new MongoInvalidArgumentError('documents must be a non-empty array');
+      }
+
+      const docsWithIds = documents.map((doc, index) => {
+        if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) {
+          throw new MongoInvalidArgumentError(`documents[${index}] must be a document`);
+        }
+        return doc._id === undefined ? { ...doc, _id: new ObjectId() } : doc;
+      });
+
+      const writeErrors: MongoBulkWriteErrorEntry[] = [];
+      const insertedIds: Record<number, unknown> = {};
+      const updatedIndexNames = new Set<string>();
+      let insertedCount = 0;
+      let indexEntryUpdatesCount = 0;
+
+      await serializeStoreWrite(this.store, async () => {
+        for (let index = 0; index < docsWithIds.length; index += 1) {
+          const doc = docsWithIds[index] as WithId<T>;
+          try {
+            const indexNames = await this.insertDocument(doc);
+            insertedIds[index] = doc._id;
+            insertedCount += 1;
+            indexEntryUpdatesCount += indexNames.length;
+            for (const indexName of indexNames) {
+              updatedIndexNames.add(indexName);
+            }
+          } catch (error) {
+            if (!(error instanceof DuplicateKeyError)) {
+              throw error;
+            }
+
+            writeErrors.push({
+              index,
+              code: error.code,
+              errmsg: error.message,
+              error,
+            });
+            if (options?.ordered !== false) {
+              break;
+            }
+          }
+        }
+      });
+
+      const result: InsertManyResult = {
+        acknowledged: true,
+        insertedCount,
+        insertedIds,
+      };
+      sink.onWriteCost(
+        insertedCount,
+        0,
+        indexEntryUpdatesCount,
+        Array.from(updatedIndexNames),
+        0,
+      );
+      if (writeErrors.length > 0) {
+        throw new MongoBulkWriteError(
+          `${writeErrors.length} document(s) failed to insert`,
+          { cause: writeErrors[0].error },
+          { writeErrors, result },
+        );
+      }
+
       sink.onOpEnd(true, Date.now() - startMs);
       return sink.finalize(result) ?? result;
     } catch (error) {

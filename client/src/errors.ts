@@ -67,13 +67,35 @@ export class MongoServerError extends MongoError {
   }
 }
 
+export type MongoBulkWriteErrorEntry = {
+  index: number;
+  code?: string | number;
+  errmsg: string;
+  error: Error;
+};
+
+export type MongoBulkWriteResult = {
+  acknowledged: true;
+  insertedCount: number;
+  insertedIds: Record<number, unknown>;
+};
+
 /**
  * Error thrown for bulk write operations (e.g., when one or more writes fail in a bulk operation).
  */
 export class MongoBulkWriteError extends MongoServerError {
-  constructor(message?: string, options?: { cause?: Error }) {
+  readonly writeErrors: MongoBulkWriteErrorEntry[];
+  readonly result?: MongoBulkWriteResult;
+
+  constructor(
+    message?: string,
+    options?: { cause?: Error },
+    details?: { writeErrors?: MongoBulkWriteErrorEntry[]; result?: MongoBulkWriteResult },
+  ) {
     super(message, options);
     this.name = 'MongoBulkWriteError';
+    this.writeErrors = details?.writeErrors ?? [];
+    this.result = details?.result;
   }
 }
 

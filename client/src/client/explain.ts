@@ -1,6 +1,6 @@
 export type ExplainVerbosity = 'queryPlanner' | 'executionStats' | 'allPlansExecution';
 
-export type ExplainOperationType = 'find' | 'findOne' | 'countDocuments' | 'insertOne' | 'updateOne' | 'updateMany' | 'deleteOne';
+export type ExplainOperationType = 'find' | 'findOne' | 'countDocuments' | 'insertOne' | 'insertMany' | 'updateOne' | 'updateMany' | 'deleteOne';
 
 export type ExplainStage = 'ID_LOOKUP' | 'INDEX_LOOKUP' | 'COLLECTION_SCAN';
 

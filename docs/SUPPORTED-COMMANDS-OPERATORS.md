@@ -28,6 +28,7 @@ Supported operations with explain:
 - `findOne(query, { explain: '...' })`
 - `countDocuments(filter?, { explain: '...' })`
 - `insertOne(doc, { explain: '...' })`
+- `insertMany(documents, { explain: '...' })`
 - `updateOne(filter, update, { explain: '...' })`
 - `updateMany(filter, update, { explain: '...' })`
 - `deleteOne(filter, { explain: '...' })`
@@ -58,6 +59,14 @@ This section lists options supported by each client command, including commands 
   - Supported options/args: required doc only
   - Implementation: [client/src/client/collection.ts](../client/src/client/collection.ts#L31)
   - Test: insertOne API in [client/tests/index.test.ts](../client/tests/index.test.ts#L12)
+- SengoCollection.insertMany(documents, options?)
+  - `documents` must be a non-empty array
+  - `options.ordered` defaults to `true`; `false` continues after duplicate-key errors
+  - `options.explain` supports queryPlanner, executionStats, and allPlansExecution
+  - Successful result includes `acknowledged`, `insertedCount`, and `insertedIds` keyed by input index
+  - Duplicate-key errors throw `MongoBulkWriteError` with `writeErrors` and partial `result`
+  - Implementation: [client/src/client/collection.ts](../client/src/client/collection.ts)
+  - Tests: [client/tests/client/insertMany.test.ts](../client/tests/client/insertMany.test.ts)
 - SengoCollection.find(query, options?)
   - Supported options/args:
     - query required

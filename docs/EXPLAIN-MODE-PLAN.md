@@ -54,6 +54,7 @@ Return behavior:
 Primary API:
 
 - `collection.insertOne(doc, { explain?: ExplainVerbosity })`
+- `collection.insertMany(documents, { explain?: ExplainVerbosity })`
 - `collection.updateOne(filter, update, { explain?: ExplainVerbosity })`
 - `collection.updateMany(filter, update, { explain?: ExplainVerbosity })`
 - `collection.deleteOne(filter, { explain?: ExplainVerbosity })`
@@ -125,7 +126,7 @@ type ExplainResult<T = unknown> = {
   ok: 1;
   namespace: string;
   command: {
-    type: 'find' | 'findOne' | 'insertOne' | 'updateOne' | 'updateMany' | 'deleteOne';
+    type: 'find' | 'findOne' | 'insertOne' | 'insertMany' | 'updateOne' | 'updateMany' | 'deleteOne';
     query?: Record<string, unknown>;
     options?: Record<string, unknown>;
   };
@@ -197,7 +198,7 @@ The collector schema should optimize for low overhead and deterministic aggregat
 ### Step Event Types
 
 ```ts
-type ExplainOperationType = 'find' | 'findOne' | 'insertOne' | 'updateOne' | 'updateMany' | 'deleteOne';
+type ExplainOperationType = 'find' | 'findOne' | 'insertOne' | 'insertMany' | 'updateOne' | 'updateMany' | 'deleteOne';
 
 type ExplainStage = 'ID_LOOKUP' | 'INDEX_LOOKUP' | 'COLLECTION_SCAN';
 
@@ -501,6 +502,8 @@ Hook points:
 - `SengoCollection.insertOne`
   - document write count.
   - each index maintenance call.
+- `SengoCollection.insertMany`
+  - inserted document count and index maintenance calls.
 - `SengoCollection.updateOne`
   - find phase explain (optional nested).
   - replace write count.
@@ -665,7 +668,7 @@ Phase 1:
 
 Phase 2:
 
-- Add write explain for insertOne/updateOne/updateMany/deleteOne.
+- Add write explain for insertOne/insertMany/updateOne/updateMany/deleteOne.
 - Add index file touch reporting from S3 index persistence.
 
 Phase 3:

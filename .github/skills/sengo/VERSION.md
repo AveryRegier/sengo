@@ -1,7 +1,7 @@
 # Skill Version
 
 - Name: `sengo`
-- Version: `0.2.0`
+- Version: `0.3.0`
 - Updated: `2026-11-19`
 
 ## Update Policy
@@ -16,6 +16,7 @@
 2. Review this file for version changes.
 3. Re-test representative prompts:
    - insert
+   - insertMany with ordered and unordered duplicate handling
    - find/findOne with sort/limit
    - updateOne with `$set`
    - updateMany with `$set`

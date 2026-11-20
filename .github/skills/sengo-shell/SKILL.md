@@ -99,6 +99,15 @@ Returns:
 }
 ```
 
+### Insert Multiple Documents
+
+```
+sengo> insertMany [{"name": "Milo", "status": "ready"}, {"name": "Pippin", "status": "planned"}] {"ordered": false}
+```
+
+Returns `insertedCount` and `insertedIds`. `ordered` defaults to `true`;
+duplicate-key failures throw `MongoBulkWriteError` with partial result.
+
 ### Find Documents
 
 Basic query (all documents):
@@ -289,7 +298,7 @@ Output includes:
 - `docsExamined` vs. `docsReturned` shows filtering efficiency.
 - Queries with `docsExamined >> docsReturned` benefit from better indexes or tighter filters.
 
-**Write Cost** (for insertOne, updateOne, updateMany, deleteOne with explain)
+**Write Cost** (for insertOne, insertMany, updateOne, updateMany, deleteOne with explain)
 - `writeStats` shows how many index entry files were updated.
 - More indexes = higher write cost; balance against read benefits.
 

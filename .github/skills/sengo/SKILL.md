@@ -1,6 +1,6 @@
 ---
 name: sengo
-description: 'Create valid Sengo client code for insertOne/find/findOne/countDocuments/updateOne/updateMany/deleteOne/createIndex/dropIndex/listIndexes. Use when generating MongoDB-like queries and updates that must actually work in Sengo (supported operators, sort, limit, count, $set). For explain-plan diagnosis and index tuning, use the sengo-explain-optimizer subskill.'
+description: 'Create valid Sengo client code for insertOne/insertMany/find/findOne/countDocuments/updateOne/updateMany/deleteOne/createIndex/dropIndex/listIndexes. Use when generating MongoDB-like queries and updates that must actually work in Sengo (supported operators, sort, limit, count, $set). For explain-plan diagnosis and index tuning, use the sengo-explain-optimizer subskill.'
 argument-hint: 'What operation do you need (insert, find, update, delete, index), and what schema/fields are involved?'
 ---
 
@@ -31,6 +31,7 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
 - `client.db(dbName?)`
 - `db.collection(name)`
 - `collection.insertOne(doc)`
+- `collection.insertMany(documents, options?)`
 - `collection.find(query, options?)`
 - `collection.findOne(query, options?)`
 - `collection.countDocuments(filter?, options?)`
@@ -48,6 +49,9 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
 - Direct equality (no operator object) is supported.
 
 ## Supported Options by Command
+- `insertMany(documents, options?)`
+  - `options.ordered` defaults to `true`; set `false` to continue after duplicate-key errors
+  - `options.explain` reports write costs
 - `find(query, options?)`
   - `options.sort`
   - `options.limit`
@@ -93,7 +97,7 @@ write cannot be verified, and that S3 claim does not expire automatically.
 
 ## Procedure
 1. Identify intent
-- Classify request as insert, find, findOne, updateOne, updateMany, deleteOne, index management, or mixed workflow.
+- Classify request as insertOne, insertMany, find, findOne, updateOne, updateMany, deleteOne, index management, or mixed workflow.
 
 2. Validate requested syntax against Sengo support
 - Reject/replace unsupported operators and options.
@@ -104,6 +108,7 @@ write cannot be verified, and that S3 claim does not expire automatically.
 - Update object uses `$set` only.
 
 4. Add options where useful
+- For `insertMany`, set `ordered: false` only when continuing after duplicate-key errors is desired.
 - Add `sort` and/or `limit` only on `find`/`findOne`.
 - For `findOne`, keep in mind effective result count is always 1.
 - For `countDocuments`, use `skip`/`limit` only when the caller wants count windowing.
@@ -138,6 +143,19 @@ const collection = client.db('s3').collection<{ name: string; age: number }>('pe
 const result = await collection.insertOne({ name: 'Alice', age: 30 });
 await client.close();
 ```
+
+### InsertMany
+```ts
+const result = await collection.insertMany([
+  { name: 'Milo', age: 4 },
+  { name: 'Pippin', age: 2 },
+]);
+
+console.log(result.insertedCount, result.insertedIds);
+```
+
+Use `{ ordered: false }` to continue after duplicate-key errors. Sengo throws
+`MongoBulkWriteError` and exposes partial successes through `error.result`.
 
 ### Find with sort and limit
 ```ts
@@ -206,7 +224,7 @@ await collection.dropIndex(indexName);
 ```
 
 ## Unsupported Request Handling
-If user asks for unsupported features (for example aggregation pipelines, `$and`, `$regex`, `$unset`, bulk writes, transactions):
+If user asks for unsupported features (for example aggregation pipelines, `$and`, `$regex`, `$unset`, `bulkWrite`, transactions):
 - Say that feature is not in current Sengo support surface.
 - Provide nearest supported rewrite using available commands/operators.
 - Keep generated code executable with existing Sengo APIs.

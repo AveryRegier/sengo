@@ -30,7 +30,7 @@ Sengo is a subset of MongoDB's Node.js client behavior.
 ## Required Scope
 
 - Query explain for `find` and `findOne`.
-- Write explain for `insertOne`, `updateOne`, `updateMany`, and `deleteOne`.
+- Write explain for `insertOne`, `insertMany`, `updateOne`, `updateMany`, and `deleteOne`.
 - Verbosity model compatible in spirit with MongoDB (`queryPlanner`, `executionStats`, `allPlansExecution`).
 
 ## Encapsulation Requirement (Mandatory)
@@ -74,6 +74,8 @@ Allowed update operators:
 - `$set`
 - `$setOnInsert` when `updateOne` or `updateMany` uses `{ upsert: true }`
 
+`insertMany` supports `ordered` to control continuation after duplicate-key errors.
+
 Unsupported operators/features must never be presented as supported. Explain should report them explicitly as unimplemented.
 
 Compatibility prerequisite:
@@ -85,7 +87,7 @@ Compatibility prerequisite:
 - `client/src/client/collection.ts`
   - always create explain sink from `client/src/client/explain.ts` (`NullExplainSink` if explain is disabled).
   - `_findFilterSort`: post-load filter count, post-load sort/limit usage.
-  - `insertOne`, `updateOne`, `updateMany`, `deleteOne`: write and index-maintenance cost accounting.
+  - `insertOne`, `insertMany`, `updateOne`, `updateMany`, `deleteOne`: write and index-maintenance cost accounting.
 - `client/src/repository/s3/s3CollectionStore.ts`
   - `findCandidates`: winning/rejected plans, key generation, candidate IDs, dedupe, scan fallback reason.
   - `scan`: full scan marker and scan reason.

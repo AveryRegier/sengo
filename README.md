@@ -72,7 +72,7 @@ Sengo gives you a MongoDB-like programming model for common application workflow
 
 What you can do today:
 
-- Insert a single document with `insertOne`
+- Insert one or many documents with `insertOne` and `insertMany`
 - Query documents with `find` and `findOne`
 - Count matching documents with `countDocuments`
 - Update a single document with `updateOne` using `$set`
@@ -117,6 +117,12 @@ await orders.insertOne({
    total: 149.99,
    createdAt: new Date().toISOString(),
 });
+
+// Insert multiple documents
+const bulkInsertResult = await orders.insertMany([
+   { customerId: 'cust-456', status: 'new', total: 89.99, createdAt: new Date().toISOString() },
+   { customerId: 'cust-789', status: 'new', total: 120, createdAt: new Date().toISOString() },
+]);
 
 // Find with operators + sort + limit
 const recentHighValue = await orders.find(
