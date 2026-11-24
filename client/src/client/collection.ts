@@ -171,6 +171,98 @@ export class SengoCollection<T> {
     return true;
   }
 
+  private async getMatchingIndex(
+    query: Record<string, any>,
+  ): Promise<CollectionIndex | undefined> {
+    const indexes = await this.store.getIndexes();
+    return Array.from(indexes.values()).find(index => index.canSatisfyQuery(query));
+  }
+
+  private async recordReadExplain(
+    sink: ExplainSink,
+    query: Record<string, any>,
+    stats: {
+      docsLoaded: number;
+      docsMatched: number;
+      hasSort: boolean;
+      hasLimit: boolean;
+      limitServedByIndex: boolean;
+      limitNote?: string;
+      loadMode: 'indexLookup' | 'scan';
+      matchingIndex?: CollectionIndex;
+    },
+  ): Promise<void> {
+    const matchingIndex = stats.matchingIndex ?? await this.getMatchingIndex(query);
+    const stage = matchingIndex ? 'INDEX_LOOKUP' : 'COLLECTION_SCAN';
+
+    sink.onPlanWinner(
+      stage,
+      matchingIndex?.name,
+      !matchingIndex ? 'No usable index for query' : undefined,
+    );
+    sink.onDocsLoaded(this.name, stats.docsLoaded, stats.loadMode);
+    sink.onDocsMatched(stats.docsMatched);
+    sink.onSortLimit(
+      stats.hasSort,
+      stats.hasLimit,
+      stats.limitServedByIndex,
+      stats.limitNote,
+    );
+
+    for (const [field, value] of Object.entries(query)) {
+      for (const expr of describeQueryExpressions(field, value, matchingIndex)) {
+        sink.onExprStat(
+          expr.field,
+          expr.operator,
+          expr.implemented,
+          expr.appliedAt,
+          expr.note,
+        );
+      }
+    }
+  }
+
+  private applyUpdate<TDoc>(
+    doc: WithId<TDoc>,
+    update: Record<string, any>,
+  ): WithId<TDoc> {
+    return {
+      ...doc,
+      ...update.$set,
+    };
+  }
+
+  private async claimUniqueIndexes(
+    indexes: Map<string, CollectionIndex>,
+    current: WithId<Record<string, any>>,
+    updated: WithId<Record<string, any>>,
+  ): Promise<CollectionIndex[]> {
+    const claimed: CollectionIndex[] = [];
+    for (const index of indexes.values()) {
+      if (index.unique && !index.hasSameUniqueKey(current, updated)) {
+        await index.addDocument(updated);
+        claimed.push(index);
+      }
+    }
+    return claimed;
+  }
+
+  private async rollbackUniqueIndexes(
+    claimed: CollectionIndex[],
+    current: WithId<Record<string, any>>,
+    updated: WithId<Record<string, any>>,
+  ): Promise<unknown[]> {
+    const cleanupErrors: unknown[] = [];
+    for (const index of claimed.reverse()) {
+      try {
+        await index.updateIndexOnDocumentUpdate(updated, current);
+      } catch (cleanupError) {
+        cleanupErrors.push(cleanupError);
+      }
+    }
+    return cleanupErrors;
+  }
+
   /**
    * Drop an index by name (MongoDB compatible: dropIndex)
    */
@@ -327,31 +419,19 @@ export class SengoCollection<T> {
       );
       sink.onTimingPart('documentLoad', Date.now() - loadStartMs, docs.length);
 
-      const indexes = await this.store.getIndexes();
-      const matchingIndex = Array.from(indexes.values()).find(index => index.canSatisfyQuery(query));
-      const stage = matchingIndex ? 'INDEX_LOOKUP' : 'COLLECTION_SCAN';
-
-      sink.onPlanWinner(stage, matchingIndex?.name, !matchingIndex ? 'No usable index for query' : undefined);
-      sink.onDocsLoaded(this.name, docs.length, matchingIndex ? 'indexLookup' : 'scan');
-      sink.onDocsMatched(docs.length);
-      sink.onSortLimit(
-        !!options?.sort,
-        options?.limit !== undefined,
-        !!matchingIndex && options?.limit !== undefined,
-        matchingIndex && options?.limit !== undefined ? 'limit served by index ordering' : undefined,
-      );
-
-      for (const [field, value] of Object.entries(query)) {
-        for (const expr of describeQueryExpressions(field, value, matchingIndex)) {
-          sink.onExprStat(
-            expr.field,
-            expr.operator,
-            expr.implemented,
-            expr.appliedAt,
-            expr.note,
-          );
-        }
-      }
+      const matchingIndex = await this.getMatchingIndex(query);
+      await this.recordReadExplain(sink, query, {
+        docsLoaded: docs.length,
+        docsMatched: docs.length,
+        hasSort: !!options?.sort,
+        hasLimit: options?.limit !== undefined,
+        limitServedByIndex: !!matchingIndex && options?.limit !== undefined,
+        limitNote: matchingIndex && options?.limit !== undefined
+          ? 'limit served by index ordering'
+          : undefined,
+        loadMode: matchingIndex ? 'indexLookup' : 'scan',
+        matchingIndex,
+      });
 
       return docs;
     };
@@ -416,31 +496,19 @@ export class SengoCollection<T> {
         logger => logger.addContexts({cn: "SengoCollection", fn: 'findOne', collection: this.name }));
       sink.onTimingPart('documentLoad', Date.now() - loadStartMs, docs.length);
 
-      const indexes = await this.store.getIndexes();
-      const matchingIndex = Array.from(indexes.values()).find(index => index.canSatisfyQuery(query));
-      const stage = matchingIndex ? 'INDEX_LOOKUP' : 'COLLECTION_SCAN';
-
-      sink.onPlanWinner(stage, matchingIndex?.name, !matchingIndex ? 'No usable index for query' : undefined);
-      sink.onDocsLoaded(this.name, docs.length, matchingIndex ? 'indexLookup' : 'scan');
-      sink.onDocsMatched(docs.length);
-      sink.onSortLimit(
-        !!options?.sort,
-        true,
-        !!matchingIndex && !!options?.limit,
-        matchingIndex && !!options?.limit ? 'limit served by index ordering' : undefined,
-      );
-
-      for (const [field, value] of Object.entries(query)) {
-        for (const expr of describeQueryExpressions(field, value, matchingIndex)) {
-          sink.onExprStat(
-            expr.field,
-            expr.operator,
-            expr.implemented,
-            expr.appliedAt,
-            expr.note,
-          );
-        }
-      }
+      const matchingIndex = await this.getMatchingIndex(query);
+      await this.recordReadExplain(sink, query, {
+        docsLoaded: docs.length,
+        docsMatched: docs.length,
+        hasSort: !!options?.sort,
+        hasLimit: true,
+        limitServedByIndex: !!matchingIndex && !!options?.limit,
+        limitNote: matchingIndex && options?.limit
+          ? 'limit served by index ordering'
+          : undefined,
+        loadMode: matchingIndex ? 'indexLookup' : 'scan',
+        matchingIndex,
+      });
 
       return docs.length > 0 ? docs[0] : null;
     };
@@ -501,35 +569,20 @@ export class SengoCollection<T> {
       );
       sink.onTimingPart('documentLoad', Date.now() - loadStartMs, loadedDocsCount);
 
-      const indexes = await this.store.getIndexes();
-      const matchingIndex = Array.from(indexes.values()).find(index => index.canSatisfyQuery(filter));
-      const stage = matchingIndex ? 'INDEX_LOOKUP' : 'COLLECTION_SCAN';
-
-      sink.onPlanWinner(stage, matchingIndex?.name, !matchingIndex ? 'No usable index for query' : undefined);
-      sink.onDocsLoaded(this.name, usedIndexOnly ? 0 : loadedDocsCount, matchingIndex ? 'indexLookup' : 'scan');
-
       const skip = normalizeCountOption(options?.skip);
       const limit = normalizeCountOption(options?.limit);
       const sliced = applyCountWindow(docs, skip, limit);
-      sink.onDocsMatched(sliced.length);
-      sink.onSortLimit(
-        false,
-        options?.skip !== undefined || options?.limit !== undefined,
-        usedIndexOnly,
-        usedIndexOnly ? 'count satisfied by index lookup only' : undefined,
-      );
-
-      for (const [field, value] of Object.entries(filter)) {
-        for (const expr of describeQueryExpressions(field, value, matchingIndex)) {
-          sink.onExprStat(
-            expr.field,
-            expr.operator,
-            expr.implemented,
-            expr.appliedAt,
-            expr.note,
-          );
-        }
-      }
+      const matchingIndex = await this.getMatchingIndex(filter);
+      await this.recordReadExplain(sink, filter, {
+        docsLoaded: usedIndexOnly ? 0 : loadedDocsCount,
+        docsMatched: sliced.length,
+        hasSort: false,
+        hasLimit: options?.skip !== undefined || options?.limit !== undefined,
+        limitServedByIndex: usedIndexOnly,
+        limitNote: usedIndexOnly ? 'count satisfied by index lookup only' : undefined,
+        loadMode: matchingIndex ? 'indexLookup' : 'scan',
+        matchingIndex,
+      });
 
       return sliced.length;
     };
@@ -583,34 +636,22 @@ export class SengoCollection<T> {
           return this.docMatchesFilter(current, filter);
         };
 
-        const applyUpdate = (current: WithId<Record<string, any>>) => {
-          let updatedDoc = { ...current };
-          if (update.$set) {
-            updatedDoc = { ...updatedDoc, ...update.$set };
-          }
-          return updatedDoc;
-        };
-
         const indexes = await this.store.getIndexes();
-        const updatedDoc = applyUpdate(doc);
+        const updatedDoc = this.applyUpdate(doc, update);
         const claimedUniqueIndexes: CollectionIndex[] = [];
         try {
-          for (const index of indexes.values()) {
-            if (index.unique && !index.hasSameUniqueKey(doc, updatedDoc)) {
-              await index.addDocument(updatedDoc);
-              claimedUniqueIndexes.push(index);
-            }
-          }
-          await this.store.updateOne(doc._id, applyUpdate as any, validateFilter as any);
+          claimedUniqueIndexes.push(...await this.claimUniqueIndexes(indexes, doc, updatedDoc));
+          await this.store.updateOne(
+            doc._id,
+            (current: WithId<T>) => this.applyUpdate(current, update),
+            validateFilter as any,
+          );
         } catch (error) {
-          const cleanupErrors: unknown[] = [];
-          for (const index of claimedUniqueIndexes.reverse()) {
-            try {
-              await index.updateIndexOnDocumentUpdate(updatedDoc, doc);
-            } catch (cleanupError) {
-              cleanupErrors.push(cleanupError);
-            }
-          }
+          const cleanupErrors = await this.rollbackUniqueIndexes(
+            claimedUniqueIndexes,
+            doc,
+            updatedDoc,
+          );
           if (cleanupErrors.length > 0) {
             throw new MongoServerError(
               `Update failed and ${cleanupErrors.length} unique index claim(s) could not be rolled back`,
@@ -695,11 +736,7 @@ export class SengoCollection<T> {
         const updatedIndexNames = new Set<string>();
 
         for (const doc of docs) {
-          const applyUpdate = (current: WithId<Record<string, any>>) => ({
-            ...current,
-            ...update.$set,
-          });
-          const updatedDoc = applyUpdate(doc);
+          const updatedDoc = this.applyUpdate(doc, update);
           if (isDeepStrictEqual(doc, updatedDoc)) {
             matchedCount += 1;
             continue;
@@ -710,22 +747,18 @@ export class SengoCollection<T> {
           const claimedUniqueIndexes: CollectionIndex[] = [];
 
           try {
-            for (const index of indexes.values()) {
-              if (index.unique && !index.hasSameUniqueKey(doc, updatedDoc)) {
-                await index.addDocument(updatedDoc);
-                claimedUniqueIndexes.push(index);
-              }
-            }
-            await this.store.updateOne(doc._id, applyUpdate as any, validateFilter as any);
+            claimedUniqueIndexes.push(...await this.claimUniqueIndexes(indexes, doc, updatedDoc));
+            await this.store.updateOne(
+              doc._id,
+              (current: WithId<T>) => this.applyUpdate(current, update),
+              validateFilter as any,
+            );
           } catch (error) {
-            const cleanupErrors: unknown[] = [];
-            for (const index of claimedUniqueIndexes.reverse()) {
-              try {
-                await index.updateIndexOnDocumentUpdate(updatedDoc, doc);
-              } catch (cleanupError) {
-                cleanupErrors.push(cleanupError);
-              }
-            }
+            const cleanupErrors = await this.rollbackUniqueIndexes(
+              claimedUniqueIndexes,
+              doc,
+              updatedDoc,
+            );
             if (cleanupErrors.length > 0) {
               throw new MongoServerError(
                 `Update failed and ${cleanupErrors.length} unique index claim(s) could not be rolled back`,
