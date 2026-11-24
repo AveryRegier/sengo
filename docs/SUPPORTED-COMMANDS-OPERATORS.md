@@ -56,7 +56,7 @@ This section lists options supported by each client command, including commands 
   - Implementation: [client/src/client/db.ts](../client/src/client/db.ts#L24)
   - Test: closed-store behavior after close in [client/tests/index.test.ts](../client/tests/index.test.ts#L33)
 - SengoCollection.insertOne(doc)
-  - Supported options/args: required doc only
+  - Supports `options.explain`.
   - Implementation: [client/src/client/collection.ts](../client/src/client/collection.ts#L31)
   - Test: insertOne API in [client/tests/index.test.ts](../client/tests/index.test.ts#L12)
 - SengoCollection.insertMany(documents, options?)
@@ -106,7 +106,7 @@ This section lists options supported by each client command, including commands 
   - Supported options/args:
     - filter required
     - update required
-    - supported update operators: $set and $setOnInsert
+    - supported update operators: `$set`, `$setOnInsert`, `$inc`, `$unset`, and `$push`
     - options.upsert inserts a document when no document matches
     - options.explain supports queryPlanner, executionStats, and allPlansExecution
   - Implementation:
@@ -115,10 +115,11 @@ This section lists options supported by each client command, including commands 
   - Tests:
     - updateOne by _id in [client/tests/client/updateOne-byId.test.ts](../client/tests/client/updateOne-byId.test.ts#L16)
     - upsert and $setOnInsert in [client/tests/sengo-test-future-phases/upsert.test.ts](../client/tests/sengo-test-future-phases/upsert.test.ts#L1)
+  - Returns `acknowledged`, `matchedCount`, `modifiedCount`, `upsertedCount`, and `upsertedId` (`null` when no upsert occurred).
 - SengoCollection.updateMany(filter, update, options?)
   - Supported options/args:
     - filter required
-    - update required; `$set` supported
+    - update required; supports the same update operators as `updateOne`
     - options.upsert inserts one document when no document matches; `$setOnInsert` applies only to that insert
     - options.explain supports queryPlanner, executionStats, and allPlansExecution
   - Results include `acknowledged`, `matchedCount`, `modifiedCount`, `upsertedCount`, and `upsertedId`
@@ -257,14 +258,17 @@ These fields are the contract the AI skill should use when deciding whether a qu
 
 ## Update Operators
 
-- $set
-  - Implementation: update.$set handling in [client/src/client/collection.ts](../client/src/client/collection.ts)
-  - Tests: updateOne in [client/tests/client/updateOne-byId.test.ts](../client/tests/client/updateOne-byId.test.ts#L16), updateMany in [client/tests/client/updateMany.test.ts](../client/tests/client/updateMany.test.ts)
+- `$set` and `$setOnInsert` (the latter only when upserting).
+- `$inc` increments numeric fields, creating missing fields; nonnumeric fields fail.
+- `$unset` removes fields; missing fields are unchanged.
+- `$push` appends one value to an array or creates an array when missing. Array values are appended as a single element.
+- These operators accept dotted paths and numeric array positions; positional operators and `$push` modifiers such as `$each` are not supported.
+- Implementation: [update.ts](../client/src/client/update.ts).
+- Tests: [write-parity.test.ts](../client/tests/client/write-parity.test.ts), [updateMany.test.ts](../client/tests/client/updateMany.test.ts).
 
 Current limitation:
 
-- Non-operator update documents are rejected
-  - Implementation: explicit rejection message in [client/src/client/collection.ts](../client/src/client/collection.ts#L110)
+- Replacement documents, update pipelines, positional update operators, and `$push` modifiers are rejected.
 
 ## Query Options
 

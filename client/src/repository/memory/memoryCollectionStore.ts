@@ -110,7 +110,7 @@ export class MemoryCollectionStore<T> implements CollectionStore<T> {
         sink?.onPlanWinner('INDEX_LOOKUP', index.name);
         const keys = Array.from(idsSet);
         const loadDefault = async () => this.documents.filter(doc => 
-          doc._id && idsSet.has(doc._id.toString())
+          doc._id !== undefined && idsSet.has(String(doc._id))
         ) as WithId<T>[];
 
         if (loadDocuments) {

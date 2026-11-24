@@ -63,11 +63,11 @@ Skill versioning and update policy are documented in [VERSION.md](./VERSION.md).
   - `options.limit`
   - `options.explain`
 - `updateOne(filter, update, options?)`
-  - update document supports `$set` and `$setOnInsert`
+  - update document supports `$set`, `$setOnInsert`, `$inc`, `$unset`, and `$push` (single value, no modifiers)
   - `options.upsert` inserts when no document matches
   - `options.explain` reports write costs
 - `updateMany(filter, update, options?)`
-  - update document supports `$set`; `$setOnInsert` applies only when `{ upsert: true }` inserts
+  - supports the same update operators as `updateOne`; `$setOnInsert` applies only when `{ upsert: true }` inserts
   - updates every matching document
   - `options.upsert` inserts one document when no document matches
   - `options.explain` reports write costs
@@ -90,7 +90,7 @@ write cannot be verified, and that S3 claim does not expire automatically.
 4. Use only the supported operators listed above.
 5. Treat `$limit` as an option (`find(..., { limit: n })`), not as a query operator.
 6. For single-document read, prefer `findOne` over `find(..., { limit: 1 })`.
-7. For updates, use `$set`; do not emit replacement-style updates.
+7. For updates, use supported operators; do not emit replacement-style updates or `$push` modifiers.
 8. Keep queries field-accurate to the provided schema.
 9. If a requested MongoDB feature is unsupported, provide the closest supported alternative and state the gap.
 10. Recommend only indexes that are supported and useful in Sengo's S3 index model.
@@ -105,7 +105,7 @@ write cannot be verified, and that S3 claim does not expire automatically.
 
 3. Build query/update shape
 - Filter/query object uses supported operators only.
-- Update object uses `$set` only.
+- Update object uses supported update operators only.
 
 4. Add options where useful
 - For `insertMany`, set `ordered: false` only when continuing after duplicate-key errors is desired.
@@ -127,7 +127,7 @@ write cannot be verified, and that S3 claim does not expire automatically.
 - Command exists in supported list.
 - Every operator is supported.
 - Options appear only on commands that accept them.
-- Update uses `$set`.
+- Update uses supported update operators.
 - Recommended indexes are representable by `createIndex` and match supported compound-index behavior.
 - No shell syntax.
 
@@ -199,6 +199,14 @@ const updateResult = await collection.updateMany(
 );
 ```
 
+### Increment and remove fields
+```ts
+await collection.updateMany(
+  { status: 'pending' },
+  { $inc: { attempts: 1 }, $unset: { temporaryNote: '' } }
+);
+```
+
 ### UpdateOne with upsert
 ```ts
 const updateResult = await collection.updateOne(
@@ -224,7 +232,7 @@ await collection.dropIndex(indexName);
 ```
 
 ## Unsupported Request Handling
-If user asks for unsupported features (for example aggregation pipelines, `$and`, `$regex`, `$unset`, `bulkWrite`, transactions):
+If user asks for unsupported features (for example aggregation pipelines, `$and`, `$regex`, `$push` modifiers, `bulkWrite`, transactions):
 - Say that feature is not in current Sengo support surface.
 - Provide nearest supported rewrite using available commands/operators.
 - Keep generated code executable with existing Sengo APIs.

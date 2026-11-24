@@ -9,6 +9,7 @@ import { sort, Sort } from '../util/sort.js';
 import { evaluateFieldPathComparison } from './expression.js';
 import { getOperator } from './expr/index';
 import { createExplainSink, ExplainResult, ExplainSink, ExplainVerbosity } from './explain';
+import { applyUpdate, validateUpdate } from './update';
 
 export type FindOptions = {
   sort?: Sort;
@@ -27,9 +28,22 @@ export type UpdateOptions = {
   explain?: ExplainVerbosity;
 };
 
+export type UpdateResult = {
+  acknowledged: true;
+  matchedCount: number;
+  modifiedCount: number;
+  upsertedCount: number;
+  upsertedId: unknown | null;
+};
+
 export type InsertManyOptions = {
   ordered?: boolean;
   explain?: ExplainVerbosity;
+};
+
+export type InsertOneResult = {
+  acknowledged: true;
+  insertedId: string | number | ObjectId | null;
 };
 
 export type InsertManyResult = {
@@ -38,7 +52,16 @@ export type InsertManyResult = {
   insertedIds: Record<number, unknown>;
 };
 
+type InsertBatchOutcome = {
+  result: InsertManyResult;
+  writeErrors: MongoBulkWriteErrorEntry[];
+  indexEntryUpdatesCount: number;
+  indexNames: string[];
+};
+
 const storeWriteQueues = new WeakMap<object, Promise<void>>();
+
+class StaleUpdateSnapshotError extends Error {}
 
 async function serializeStoreWrite<T>(store: object, operation: () => Promise<T>): Promise<T> {
   const previous = storeWriteQueues.get(store) ?? Promise.resolve();
@@ -115,39 +138,28 @@ export class SengoCollection<T> {
     return indexNames;
   }
 
-  private validateUpdateDocument(update: Record<string, any>): void {
-    const supportedOperators = ['$set', '$setOnInsert'];
-    const updateOperators = Object.keys(update);
-    if (
-      updateOperators.length === 0 ||
-      updateOperators.some(operator => !supportedOperators.includes(operator))
-    ) {
-      const err = new MongoServerError(`Update document must contain supported update operators (${supportedOperators.join(', ')}). Full document replacement is not yet supported.`);
-      err.code = 9;
-      throw err;
-    }
-  }
-
   private createUpsertDocument(filter: Record<string, any>, update: Record<string, any>): Record<string, any> {
-    const upsertDocument: Record<string, any> = {};
+    const equalityFields: Record<string, any> = Object.create(null);
     for (const [field, value] of Object.entries(filter)) {
       if (field.startsWith('$')) continue;
       if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
         const operators = Object.keys(value).filter(key => key.startsWith('$'));
         if (operators.length > 0) {
           if (operators.length === 1 && operators[0] === '$eq') {
-            upsertDocument[field] = value.$eq;
+            equalityFields[field] = value.$eq;
           }
           continue;
         }
       }
-      upsertDocument[field] = value;
+      equalityFields[field] = value;
     }
-    Object.assign(upsertDocument, update.$set, update.$setOnInsert);
-    if (upsertDocument._id === undefined) {
-      upsertDocument._id = new ObjectId().toString();
+    validateUpdate({ $set: equalityFields });
+    const upsertDocument = applyUpdate<Record<string, any>>({}, { $set: equalityFields }, true);
+    const result = applyUpdate(upsertDocument, update, true);
+    if (result._id === undefined) {
+      result._id = new ObjectId().toString();
     }
-    return upsertDocument;
+    return result;
   }
 
   /**
@@ -155,20 +167,7 @@ export class SengoCollection<T> {
    * Used for validating filters in retry loops.
    */
   private docMatchesFilter(doc: Record<string, any>, filter: Record<string, any>): boolean {
-    // Handle $or operator
-    if (filter.$or && Array.isArray(filter.$or)) {
-      return filter.$or.some(condition => this.docMatchesFilter(doc, condition));
-    }
-
-    // Check all filter fields
-    for (const [key, value] of Object.entries(filter)) {
-      if (key === '$or') continue; // Already handled above
-      
-      if (!evaluateFieldPathComparison(doc, key, value)) {
-        return false;
-      }
-    }
-    return true;
+    return Object.entries(filter).every(([key, value]) => match(doc, key, value));
   }
 
   private async getMatchingIndex(
@@ -222,45 +221,54 @@ export class SengoCollection<T> {
     }
   }
 
-  private applyUpdate<TDoc>(
-    doc: WithId<TDoc>,
-    update: Record<string, any>,
-  ): WithId<TDoc> {
-    return {
-      ...doc,
-      ...update.$set,
-    };
-  }
-
-  private async claimUniqueIndexes(
-    indexes: Map<string, CollectionIndex>,
-    current: WithId<Record<string, any>>,
-    updated: WithId<Record<string, any>>,
-  ): Promise<CollectionIndex[]> {
-    const claimed: CollectionIndex[] = [];
-    for (const index of indexes.values()) {
-      if (index.unique && !index.hasSameUniqueKey(current, updated)) {
-        await index.addDocument(updated);
-        claimed.push(index);
-      }
-    }
-    return claimed;
-  }
-
   private async rollbackUniqueIndexes(
     claimed: CollectionIndex[],
-    current: WithId<Record<string, any>>,
+    current: WithId<Record<string, any>> | null,
     updated: WithId<Record<string, any>>,
   ): Promise<unknown[]> {
     const cleanupErrors: unknown[] = [];
     for (const index of claimed.reverse()) {
       try {
-        await index.updateIndexOnDocumentUpdate(updated, current);
+        if (current) {
+          await index.updateIndexOnDocumentUpdate(updated, current);
+        } else {
+          await index.removeDocument(updated);
+        }
       } catch (cleanupError) {
         cleanupErrors.push(cleanupError);
       }
     }
     return cleanupErrors;
+  }
+
+  private normalizeInsertDocument(doc: Record<string, any>, label: string): WithId<T> {
+    if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) {
+      throw new MongoInvalidArgumentError(`${label} must be a document`);
+    }
+    return (doc._id === undefined ? { ...doc, _id: new ObjectId() } : doc) as WithId<T>;
+  }
+
+  private async insertBatch(documents: WithId<T>[], ordered: boolean): Promise<InsertBatchOutcome> {
+    const result: InsertManyResult = { acknowledged: true, insertedCount: 0, insertedIds: {} };
+    const writeErrors: MongoBulkWriteErrorEntry[] = [];
+    const indexNames = new Set<string>();
+    let indexEntryUpdatesCount = 0;
+    await serializeStoreWrite(this.store, async () => {
+      for (const [index, doc] of documents.entries()) {
+        try {
+          const updatedIndexes = await this.insertDocument(doc);
+          result.insertedIds[index] = doc._id;
+          result.insertedCount += 1;
+          indexEntryUpdatesCount += updatedIndexes.length;
+          for (const name of updatedIndexes) indexNames.add(name);
+        } catch (error) {
+          if (!(error instanceof DuplicateKeyError)) throw error;
+          writeErrors.push({ index, code: error.code, errmsg: error.message, error });
+          if (ordered) break;
+        }
+      }
+    });
+    return { result, writeErrors, indexEntryUpdatesCount, indexNames: Array.from(indexNames) };
   }
 
   /**
@@ -270,7 +278,9 @@ export class SengoCollection<T> {
     return this.store.dropIndex(name);
   }
 
-  async insertOne(doc: Record<string, any>, options?: { explain?: ExplainVerbosity }) {
+  insertOne(doc: Record<string, any>, options: { explain: ExplainVerbosity }): Promise<ExplainResult<InsertOneResult>>;
+  insertOne(doc: Record<string, any>, options?: { explain?: ExplainVerbosity }): Promise<InsertOneResult>;
+  async insertOne(doc: Record<string, any>, options?: { explain?: ExplainVerbosity }): Promise<InsertOneResult | ExplainResult<InsertOneResult>> {
     const sink = createExplainSink({
       opType: 'insertOne',
       namespace: this.name,
@@ -286,12 +296,13 @@ export class SengoCollection<T> {
       if (this.store.isClosed()) {
         throw new MongoClientClosedError('Store is closed');
       }
-      const docWithId = doc._id ? doc : { ...doc, _id: new ObjectId() };
+      const docWithId = this.normalizeInsertDocument(doc, 'document');
       logger.debug('Inserting document', { doc: docWithId });
       
-      const indexNames = await serializeStoreWrite(this.store, () => this.insertDocument(docWithId as WithId<T>));
-      const result = { acknowledged: true, insertedId: docWithId._id };
-      sink.onWriteCost(1, 0, indexNames.length, indexNames, 0);
+      const outcome = await this.insertBatch([docWithId], true);
+      if (outcome.writeErrors.length > 0) throw outcome.writeErrors[0].error;
+      const result: InsertOneResult = { acknowledged: true, insertedId: docWithId._id };
+      sink.onWriteCost(1, 0, outcome.indexEntryUpdatesCount, outcome.indexNames, 0);
       sink.onOpEnd(true, Date.now() - startMs);
       return sink.finalize(result) ?? result;
     } catch (error) {
@@ -327,58 +338,15 @@ export class SengoCollection<T> {
         throw new MongoInvalidArgumentError('documents must be a non-empty array');
       }
 
-      const docsWithIds = documents.map((doc, index) => {
-        if (doc === null || typeof doc !== 'object' || Array.isArray(doc)) {
-          throw new MongoInvalidArgumentError(`documents[${index}] must be a document`);
-        }
-        return doc._id === undefined ? { ...doc, _id: new ObjectId() } : doc;
-      });
+      const docsWithIds = documents.map((doc, index) => this.normalizeInsertDocument(doc, `documents[${index}]`));
 
-      const writeErrors: MongoBulkWriteErrorEntry[] = [];
-      const insertedIds: Record<number, unknown> = {};
-      const updatedIndexNames = new Set<string>();
-      let insertedCount = 0;
-      let indexEntryUpdatesCount = 0;
-
-      await serializeStoreWrite(this.store, async () => {
-        for (let index = 0; index < docsWithIds.length; index += 1) {
-          const doc = docsWithIds[index] as WithId<T>;
-          try {
-            const indexNames = await this.insertDocument(doc);
-            insertedIds[index] = doc._id;
-            insertedCount += 1;
-            indexEntryUpdatesCount += indexNames.length;
-            for (const indexName of indexNames) {
-              updatedIndexNames.add(indexName);
-            }
-          } catch (error) {
-            if (!(error instanceof DuplicateKeyError)) {
-              throw error;
-            }
-
-            writeErrors.push({
-              index,
-              code: error.code,
-              errmsg: error.message,
-              error,
-            });
-            if (options?.ordered !== false) {
-              break;
-            }
-          }
-        }
-      });
-
-      const result: InsertManyResult = {
-        acknowledged: true,
-        insertedCount,
-        insertedIds,
-      };
+      const { result, writeErrors, indexEntryUpdatesCount, indexNames } =
+        await this.insertBatch(docsWithIds, options?.ordered !== false);
       sink.onWriteCost(
-        insertedCount,
+        result.insertedCount,
         0,
         indexEntryUpdatesCount,
-        Array.from(updatedIndexNames),
+        indexNames,
         0,
       );
       if (writeErrors.length > 0) {
@@ -603,103 +571,78 @@ export class SengoCollection<T> {
     return loader();
   }
 
-  async updateOne(filter: Record<string, any>, update: Record<string, any>, options?: UpdateOptions) {
-    const sink = createExplainSink({
-      opType: 'updateOne',
-      namespace: this.name,
-      verbosity: options?.explain,
-      hasSort: false,
-      hasLimit: false,
-      collectionName: this.name,
-    });
-    const startMs = Date.now();
-    const logger = getLogger();
-    
+  private async updateDocument(
+    doc: WithId<T>,
+    filter: Record<string, any>,
+    update: Record<string, any>,
+    indexes: Map<string, CollectionIndex>,
+    attempt = 0,
+  ): Promise<'modified' | 'unchanged' | 'stale'> {
+    const updatedDoc = applyUpdate(doc, update);
+    if (isDeepStrictEqual(doc, updatedDoc)) return 'unchanged';
+
+    const claimed: CollectionIndex[] = [];
     try {
-      this.validateUpdateDocument(update);
-
-      const outcome = await serializeStoreWrite(this.store, async () => {
-        const docs = await this.find(filter).toArray();
-        if (!docs.length) {
-          if (!options?.upsert) return null;
-
-          const upsertDocument = this.createUpsertDocument(filter, update);
-
-          const indexNames = await this.insertDocument(upsertDocument as WithId<T>);
-          return { upsertedId: upsertDocument._id, indexNames };
+      for (const index of indexes.values()) {
+        if (index.unique && !index.hasSameUniqueKey(doc, updatedDoc)) {
+          await index.addDocument(updatedDoc);
+          claimed.push(index);
         }
-
-        // Only update the first match (MongoDB semantics)
-        const doc = docs[0];
-
-        const validateFilter = (current: WithId<Record<string, any>>) => {
-          return this.docMatchesFilter(current, filter);
-        };
-
-        const indexes = await this.store.getIndexes();
-        const updatedDoc = this.applyUpdate(doc, update);
-        const claimedUniqueIndexes: CollectionIndex[] = [];
-        try {
-          claimedUniqueIndexes.push(...await this.claimUniqueIndexes(indexes, doc, updatedDoc));
-          await this.store.updateOne(
-            doc._id,
-            (current: WithId<T>) => this.applyUpdate(current, update),
-            validateFilter as any,
-          );
-        } catch (error) {
-          const cleanupErrors = await this.rollbackUniqueIndexes(
-            claimedUniqueIndexes,
-            doc,
-            updatedDoc,
-          );
-          if (cleanupErrors.length > 0) {
-            throw new MongoServerError(
-              `Update failed and ${cleanupErrors.length} unique index claim(s) could not be rolled back`,
-              { cause: error instanceof Error ? error : new Error(String(error)) },
-            );
-          }
-          if (error instanceof Error && error.message.includes('does not match filter after reload')) {
-            return null;
-          }
-          throw error;
-        }
-
-        const indexNames: string[] = [];
-        for (const [name, index] of indexes) {
-          indexNames.push(name);
-          logger.debug('Updating doc in index', { name, doc: updatedDoc });
-          await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
-        }
-        return { indexNames };
-      });
-
-      if (!outcome) {
-        const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0 };
-        sink.onWriteCost(0, 0, 0, [], 0);
-        sink.onOpEnd(true, Date.now() - startMs);
-        return sink.finalize(result) ?? result;
       }
-
-      if ('upsertedId' in outcome) {
-        const result = { acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedId: outcome.upsertedId };
-        sink.onWriteCost(1, 0, outcome.indexNames.length, outcome.indexNames, 0);
-        sink.onOpEnd(true, Date.now() - startMs);
-        return sink.finalize(result) ?? result;
-      }
-
-      const result = { acknowledged: true, matchedCount: 1, modifiedCount: 1 };
-      sink.onWriteCost(1, 0, outcome.indexNames.length, outcome.indexNames, 0);
-      sink.onOpEnd(true, Date.now() - startMs);
-      return sink.finalize(result) ?? result;
+      await this.store.updateOne(
+        doc._id,
+        current => {
+          if (!isDeepStrictEqual(current, doc)) {
+            throw new StaleUpdateSnapshotError();
+          }
+          return applyUpdate(current, update);
+        },
+        current => this.docMatchesFilter(current, filter),
+      );
     } catch (error) {
-      sink.onOpEnd(false, Date.now() - startMs);
+      const filterChanged = error instanceof Error && error.message.includes('does not match filter after reload');
+      const snapshotChanged = error instanceof StaleUpdateSnapshotError;
+      const current = filterChanged || snapshotChanged
+        ? await this.findOne({ _id: doc._id })
+        : doc;
+      const cleanupErrors = await this.rollbackUniqueIndexes(claimed, current, updatedDoc);
+      if (cleanupErrors.length > 0) {
+        throw new MongoServerError(
+          `Update failed and ${cleanupErrors.length} unique index claim(s) could not be rolled back`,
+          { cause: error instanceof Error ? error : new Error(String(error)) },
+        );
+      }
+      if (filterChanged) return 'stale';
+      if (snapshotChanged) {
+        if (attempt >= 2) throw new PreconditionFailedError('Document changed repeatedly during update');
+        if (!current || !this.docMatchesFilter(current, filter)) return 'stale';
+        return this.updateDocument(current, filter, update, indexes, attempt + 1);
+      }
       throw error;
     }
+
+    for (const [name, index] of indexes) {
+      getLogger().debug('Updating doc in index', { name, doc: updatedDoc });
+      await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
+    }
+    return 'modified';
   }
 
-  async updateMany(filter: Record<string, any>, update: Record<string, any>, options?: UpdateOptions) {
+  updateOne(filter: Record<string, any>, update: Record<string, any>, options: UpdateOptions & { explain: ExplainVerbosity }): Promise<ExplainResult<UpdateResult>>;
+  updateOne(filter: Record<string, any>, update: Record<string, any>, options?: UpdateOptions): Promise<UpdateResult>;
+  updateOne(filter: Record<string, any>, update: Record<string, any>, options?: UpdateOptions): Promise<UpdateResult | ExplainResult<UpdateResult>> {
+    return this.updateDocuments(filter, update, options, false);
+  }
+
+  updateMany(filter: Record<string, any>, update: Record<string, any>, options: UpdateOptions & { explain: ExplainVerbosity }): Promise<ExplainResult<UpdateResult>>;
+  updateMany(filter: Record<string, any>, update: Record<string, any>, options?: UpdateOptions): Promise<UpdateResult>;
+  updateMany(filter: Record<string, any>, update: Record<string, any>, options?: UpdateOptions): Promise<UpdateResult | ExplainResult<UpdateResult>> {
+    return this.updateDocuments(filter, update, options, true);
+  }
+
+  private async updateDocuments(filter: Record<string, any>, update: Record<string, any>, options: UpdateOptions | undefined, many: boolean): Promise<UpdateResult | ExplainResult<UpdateResult>> {
     const sink = createExplainSink({
-      opType: 'updateMany',
+      opType: many ? 'updateMany' : 'updateOne',
       namespace: this.name,
       verbosity: options?.explain,
       hasSort: false,
@@ -709,20 +652,23 @@ export class SengoCollection<T> {
     const startMs = Date.now();
 
     try {
-      this.validateUpdateDocument(update);
+      validateUpdate(update);
       const outcome = await serializeStoreWrite(this.store, async () => {
         const docs = await this.find(filter).toArray();
+        const result: UpdateResult = {
+          acknowledged: true, matchedCount: 0, modifiedCount: 0, upsertedCount: 0, upsertedId: null,
+        };
         if (docs.length === 0) {
           if (!options?.upsert) {
-            return { matchedCount: 0, modifiedCount: 0, upsertedId: null, documentWrites: 0, indexNames: [], indexEntryUpdatesCount: 0 };
+            return { result, documentWrites: 0, indexNames: [], indexEntryUpdatesCount: 0 };
           }
 
           const upsertDocument = this.createUpsertDocument(filter, update);
           const indexNames = await this.insertDocument(upsertDocument as WithId<T>);
+          result.upsertedId = upsertDocument._id;
+          result.upsertedCount = 1;
           return {
-            matchedCount: 0,
-            modifiedCount: 0,
-            upsertedId: upsertDocument._id,
+            result,
             documentWrites: 1,
             indexNames,
             indexEntryUpdatesCount: indexNames.length,
@@ -730,73 +676,29 @@ export class SengoCollection<T> {
         }
 
         const indexes = await this.store.getIndexes();
-        let matchedCount = 0;
-        let modifiedCount = 0;
         let indexEntryUpdatesCount = 0;
         const updatedIndexNames = new Set<string>();
 
-        for (const doc of docs) {
-          const updatedDoc = this.applyUpdate(doc, update);
-          if (isDeepStrictEqual(doc, updatedDoc)) {
-            matchedCount += 1;
-            continue;
-          }
-
-          const validateFilter = (current: WithId<Record<string, any>>) =>
-            this.docMatchesFilter(current, filter);
-          const claimedUniqueIndexes: CollectionIndex[] = [];
-
-          try {
-            claimedUniqueIndexes.push(...await this.claimUniqueIndexes(indexes, doc, updatedDoc));
-            await this.store.updateOne(
-              doc._id,
-              (current: WithId<T>) => this.applyUpdate(current, update),
-              validateFilter as any,
-            );
-          } catch (error) {
-            const cleanupErrors = await this.rollbackUniqueIndexes(
-              claimedUniqueIndexes,
-              doc,
-              updatedDoc,
-            );
-            if (cleanupErrors.length > 0) {
-              throw new MongoServerError(
-                `Update failed and ${cleanupErrors.length} unique index claim(s) could not be rolled back`,
-                { cause: error instanceof Error ? error : new Error(String(error)) },
-              );
-            }
-            if (error instanceof Error && error.message.includes('does not match filter after reload')) {
-              continue;
-            }
-            throw error;
-          }
-
-          matchedCount += 1;
-          modifiedCount += 1;
-          for (const [name, index] of indexes) {
+        for (const doc of many ? docs : docs.slice(0, 1)) {
+          const status = await this.updateDocument(doc, filter, update, indexes);
+          if (status === 'stale') continue;
+          result.matchedCount += 1;
+          if (status === 'unchanged') continue;
+          result.modifiedCount += 1;
+          for (const name of indexes.keys()) {
             updatedIndexNames.add(name);
-            await index.updateIndexOnDocumentUpdate(doc, updatedDoc);
             indexEntryUpdatesCount += 1;
           }
         }
 
         return {
-          matchedCount,
-          modifiedCount,
-          upsertedId: null,
-          documentWrites: modifiedCount,
+          result,
+          documentWrites: result.modifiedCount,
           indexNames: Array.from(updatedIndexNames),
           indexEntryUpdatesCount,
         };
       });
 
-      const result = {
-        acknowledged: true,
-        matchedCount: outcome.matchedCount,
-        modifiedCount: outcome.modifiedCount,
-        upsertedCount: outcome.upsertedId === null ? 0 : 1,
-        upsertedId: outcome.upsertedId,
-      };
       sink.onWriteCost(
         outcome.documentWrites,
         0,
@@ -805,7 +707,7 @@ export class SengoCollection<T> {
         0,
       );
       sink.onOpEnd(true, Date.now() - startMs);
-      return sink.finalize(result) ?? result;
+      return sink.finalize(outcome.result) ?? outcome.result;
     } catch (error) {
       sink.onOpEnd(false, Date.now() - startMs);
       throw error;

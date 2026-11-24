@@ -15,6 +15,7 @@ For generated Sengo client code, validate operator and command support before fi
 ## Allowed Update Operators
 - `$set`
 - `$setOnInsert` with `updateOne(..., { upsert: true })` or `updateMany(..., { upsert: true })`
+- `$inc`, `$unset`, and `$push` (single value only; no modifiers)
 
 ## Allowed Update Options
 - `updateOne(filter, update, { upsert, explain })`
@@ -31,13 +32,13 @@ For generated Sengo client code, validate operator and command support before fi
 1. If a prompt/code sample uses unsupported Mongo operators or features, emit a clear warning and provide a working Sengo rewrite.
 2. Never present unsupported syntax as valid Sengo code.
 3. Treat `$limit` as a query option, not as a query operator.
-4. For updates, reject replacement-style update docs and rewrite with `$set` when possible.
+4. For updates, reject replacement-style update docs and use supported update operators.
 5. Keep index recommendations within tested Sengo capabilities.
 
 ## Common Unsupported Features to Flag
 - Aggregation pipeline stages (`$match`, `$group`, `$project`, `$lookup`, etc.)
 - Unsupported logical/query operators (`$and`, `$nor`, `$not`, `$regex`, `$elemMatch`, `$all`, `$size`, `$type`, `$expr`, etc.)
-- Unsupported update operators (`$unset`, `$inc`, `$push`, `$pull`, `$addToSet`, etc.)
+- Unsupported update operators and modifiers (`$pull`, `$addToSet`, `$push` with `$each`, etc.)
 - `bulkWrite` and transactions
 
 ## Source References

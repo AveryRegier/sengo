@@ -475,7 +475,7 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
       return oldValues.length === newValues.length &&
         oldValues.every((value, index) => value === newValues[index]);
     });
-    if (!sameKey && oldDoc?._id) {
+    if (!sameKey && oldDoc?._id !== undefined) {
       await this.removeDocument(oldDoc);
     }
     await this.addDocument(newDoc).finally(() => {
@@ -509,8 +509,8 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   private async changeUniqueIndex(doc: Record<string, any>, add: boolean): Promise<void> {
-    if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
-    const id = doc._id.toString();
+    if (doc._id === undefined) throw new MongoInvalidArgumentError('Document must have an _id');
+    const id = String(doc._id);
     const memberships = this.getUniqueIndexMemberships(doc);
     if (!add) {
       for (const entryKey of new Set(memberships.map(membership => membership.entryKey))) {
@@ -562,8 +562,8 @@ export abstract class BaseCollectionIndex implements CollectionIndex {
   }
 
   private async changeIndex(doc: Record<string, any>, fn: (entry: IndexEntry, id: string, keys: NormalizedIndexKeyRecord[]) => boolean) {
-    if (!doc._id) throw new MongoInvalidArgumentError('Document must have an _id');
-    const id = doc._id.toString();
+    if (doc._id === undefined) throw new MongoInvalidArgumentError('Document must have an _id');
+    const id = String(doc._id);
     if (!this.hasFirstKey(doc)) {
       // If the first key is not set, we don't index this document
       return;

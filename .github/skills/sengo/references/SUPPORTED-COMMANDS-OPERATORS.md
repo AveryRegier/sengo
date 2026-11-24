@@ -28,6 +28,8 @@ This reference is scoped to code generation for Sengo client users.
 
 - `$set`
 - `$setOnInsert` (applied only when `options.upsert` inserts a document)
+- `$inc`, `$unset`, and `$push` (one appended value; modifiers such as `$each` are unsupported)
+- Dotted field paths and numeric array positions; positional update operators are unsupported.
 
 ## Supported Options
 
@@ -45,7 +47,7 @@ This reference is scoped to code generation for Sengo client users.
   - `options.upsert: true` inserts a document when no document matches; omitted/false does not insert.
   - `options.explain`
 - `updateMany(filter, update, options?)`
-  - Updates every matching document with `$set`.
+  - Updates every matching document using the same update operators as `updateOne`.
   - `options.upsert: true` inserts one document when no document matches; `$setOnInsert` applies only to that insert.
   - `options.explain`
 
@@ -68,8 +70,8 @@ Successful `insertMany` results include `acknowledged`, `insertedCount`, and
 `insertedIds` keyed by input index. Duplicate-key failures throw
 `MongoBulkWriteError` with error indexes and partial result.
 
-`updateMany` returns `matchedCount`, `modifiedCount`, `upsertedCount`, and
-`upsertedId`:
+Both update methods return `matchedCount`, `modifiedCount`, `upsertedCount`, and
+`upsertedId` (`null` when no upsert occurred):
 
 ```ts
 await collection.updateMany(

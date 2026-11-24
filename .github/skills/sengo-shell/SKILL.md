@@ -165,6 +165,9 @@ Update all matching documents using `$set`:
 sengo> updateMany {"status": "pending"} {"$set": {"status": "active"}}
 ```
 
+Both update methods also support `$inc`, `$unset`, and single-value `$push`.
+`$push` modifiers such as `$each` are not supported.
+
 Returns:
 ```json
 {

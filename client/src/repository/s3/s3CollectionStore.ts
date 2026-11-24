@@ -145,7 +145,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
    */
   async deleteOne(doc: WithId<T>): Promise<void> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
-    if (!doc._id) throw new MongoInvalidArgumentError('deleteOne requires _id');
+    if (doc._id === undefined) throw new MongoInvalidArgumentError('deleteOne requires _id');
     const key = this.id2key(doc._id);
     const args = {
       Bucket: this.bucket,
@@ -185,7 +185,7 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
 
   public async findCandidates(query: Record<string, any>, options?: FindOptions, sink?: ExplainSink, loadDocuments?: CandidateLoadDocuments<T>): Promise<WithId<T>[]> {
     if (this.closed) throw new MongoClientClosedError('Store is closed');
-    if (query._id) {
+    if (query._id !== undefined && query._id !== null) {
       const ids: string[] = [];
       if (query._id.$in) {
         query._id.$in.forEach((v: string) => ids.push(v));

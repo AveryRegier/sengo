@@ -17,6 +17,18 @@ describe('Shell Command Integration Tests', () => {
     await client.close();
   });
 
+  it('passes update operators parsed from shell input to the client', async () => {
+    await collection.insertOne({ _id: 'recipe', count: 1, tags: [], note: 'temporary' });
+    const args = parseArgsWithJson([
+      '{"_id":"recipe"}',
+      '{"$inc":{"count":2},"$unset":{"note":""},"$push":{"tags":"fresh"}}',
+    ]);
+    expect(await collection.updateOne(...args)).toMatchObject({ matchedCount: 1, modifiedCount: 1 });
+    const doc = await collection.findOne({ _id: 'recipe' });
+    expect(doc).toMatchObject({ count: 3, tags: ['fresh'] });
+    expect(doc).not.toHaveProperty('note');
+  });
+
   describe('find with unquoted properties', () => {
     beforeEach(async () => {
       await collection.insertOne({ _id: '1', name: 'Alice', age: 25, active: true, email: 'alice@test.com' });

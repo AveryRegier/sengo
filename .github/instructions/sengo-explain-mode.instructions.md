@@ -73,6 +73,7 @@ Allowed update operators:
 
 - `$set`
 - `$setOnInsert` when `updateOne` or `updateMany` uses `{ upsert: true }`
+- `$inc`, `$unset`, and `$push` without modifiers
 
 `insertMany` supports `ordered` to control continuation after duplicate-key errors.
 
