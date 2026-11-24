@@ -222,32 +222,7 @@ export class SengoCollection<T> {
       collectionName: this.name,
     });
 
-    const logger = getLogger();
-    const follower = new Follower(logger);
-    const loader = async () => {
-      const loadStartMs = Date.now();
-      const docs = await follower.follow(
-        () => this._findFilterSort(query, options, sink),
-        logger => logger.addContexts({cn: 'SengoCollection', fn: 'find', collection: this.name }),
-      );
-      sink.onTimingPart('documentLoad', Date.now() - loadStartMs, docs.length);
-
-      const matchingIndex = await this.getMatchingIndex(query);
-      await this.recordReadExplain(sink, query, {
-        docsLoaded: docs.length,
-        docsMatched: docs.length,
-        hasSort: !!options?.sort,
-        hasLimit: options?.limit !== undefined,
-        limitServedByIndex: !!matchingIndex && options?.limit !== undefined,
-        limitNote: matchingIndex && options?.limit !== undefined
-          ? 'limit served by index ordering'
-          : undefined,
-        loadMode: matchingIndex ? 'indexLookup' : 'scan',
-        matchingIndex,
-      });
-
-      return docs;
-    };
+    const loader = () => this.loadFindResults(query, options, sink, 'find');
 
     if (options?.explain) {
       const startMs = Date.now();
@@ -263,6 +238,42 @@ export class SengoCollection<T> {
     }
 
     return new LoadCursor<WithId<T>>(loader);
+  }
+
+  private async loadFindResults(
+    query: Record<string, any>,
+    options: FindOptions | undefined,
+    sink: ExplainSink,
+    operation: 'find' | 'findOne',
+  ): Promise<WithId<T>[]> {
+    const logger = getLogger();
+    const follower = new Follower(logger);
+    const loadStartMs = Date.now();
+    let docsLoaded = 0;
+    const docs = await follower.follow(
+      () => this._findFilterSort(query, options, sink, options?.explain
+        ? async request => {
+          const loaded = await request.loadDefault();
+          docsLoaded += loaded.length;
+          return loaded;
+        }
+        : undefined),
+      logger => logger.addContexts({ cn: 'SengoCollection', fn: operation, collection: this.name }),
+    );
+    const loadedCount = options?.explain ? docsLoaded : docs.length;
+    sink.onTimingPart('documentLoad', Date.now() - loadStartMs, loadedCount);
+
+    const matchingIndex = await this.getMatchingIndex(query);
+    await this.recordReadExplain(sink, query, {
+      docsLoaded: loadedCount,
+      docsMatched: docs.length,
+      hasSort: !!options?.sort,
+      hasLimit: options?.limit !== undefined,
+      limitServedByIndex: false,
+      loadMode: matchingIndex ? 'indexLookup' : 'scan',
+      matchingIndex,
+    });
+    return docs;
   }
 
   private async _findFilterSort(
@@ -297,32 +308,11 @@ export class SengoCollection<T> {
       namespace: this.name,
       verbosity: options?.explain,
       hasSort: !!options?.sort,
-      hasLimit: options?.limit !== undefined || true,
+      hasLimit: true,
       collectionName: this.name,
     });
-    const logger = getLogger();
-    const follower = new Follower(logger);
     const loader = async () => {
-      const loadStartMs = Date.now();
-      const docs = await follower.follow(
-        () => this._findFilterSort(query, { ...options, limit: 1 }, sink),
-        logger => logger.addContexts({cn: "SengoCollection", fn: 'findOne', collection: this.name }));
-      sink.onTimingPart('documentLoad', Date.now() - loadStartMs, docs.length);
-
-      const matchingIndex = await this.getMatchingIndex(query);
-      await this.recordReadExplain(sink, query, {
-        docsLoaded: docs.length,
-        docsMatched: docs.length,
-        hasSort: !!options?.sort,
-        hasLimit: true,
-        limitServedByIndex: !!matchingIndex && !!options?.limit,
-        limitNote: matchingIndex && options?.limit
-          ? 'limit served by index ordering'
-          : undefined,
-        loadMode: matchingIndex ? 'indexLookup' : 'scan',
-        matchingIndex,
-      });
-
+      const docs = await this.loadFindResults(query, { ...options, limit: 1 }, sink, 'findOne');
       return docs.length > 0 ? docs[0] : null;
     };
 

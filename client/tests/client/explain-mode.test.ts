@@ -217,15 +217,15 @@ describe('explain mode', () => {
     );
   });
 
-  it('reports sort/limit optimization effect when the index can satisfy ordering', async () => {
+  it('does not report index limit optimization when the memory store loads all candidates', async () => {
     const result = await collection.find({ status: 'active' }, { sort: { status: 1 }, limit: 1, explain: 'executionStats' }) as any;
 
     expect(result.ok).toBe(1);
     expect(result.executionStats.stage).toBe('INDEX_LOOKUP');
     expect(result.executionStats.sortAppliedAfterLoad).toBe(true);
     expect(result.executionStats.limitAppliedAfterLoad).toBe(true);
-    expect(result.executionStats.indexSortLimitOptimization.used).toBe(true);
-    expect(result.executionStats.indexSortLimitOptimization.reason).toBe('limit served by index ordering');
+    expect(result.executionStats.indexSortLimitOptimization.used).toBe(false);
+    expect(result.executionStats.indexSortLimitOptimization.reason).toBeUndefined();
     expect(result.executionStats.documentsLoaded).toBeGreaterThan(0);
     expect(result.executionStats.documentsLoaded).toBeLessThanOrEqual(2);
   });

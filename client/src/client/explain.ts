@@ -447,10 +447,12 @@ export class CollectingExplainSink implements ExplainSink {
   }
 
   onSortLimit(sortAppliedAfterLoad: boolean, limitAppliedAfterLoad: boolean, indexOptimizationUsed: boolean, indexOptimizationReason?: string): void {
-    this.state.flags.sortAppliedAfterLoad = sortAppliedAfterLoad;
-    this.state.flags.limitAppliedAfterLoad = limitAppliedAfterLoad;
-    this.state.flags.indexSortLimitOptimizationUsed = indexOptimizationUsed;
-    this.state.flags.indexSortLimitOptimizationReason = indexOptimizationReason;
+    this.state.flags.sortAppliedAfterLoad ||= sortAppliedAfterLoad;
+    this.state.flags.limitAppliedAfterLoad ||= limitAppliedAfterLoad;
+    this.state.flags.indexSortLimitOptimizationUsed ||= indexOptimizationUsed;
+    if (indexOptimizationUsed) {
+      this.state.flags.indexSortLimitOptimizationReason = indexOptimizationReason;
+    }
   }
 
   onExprStat(field: string, operator: string, implemented: boolean, appliedAt: 'index' | 'postLoad' | 'notApplied', note?: string): void {

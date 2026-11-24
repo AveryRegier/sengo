@@ -72,6 +72,7 @@ This section lists options supported by each client command, including commands 
     - query required
     - options.sort supported
     - options.limit supported
+    - indexed limits are applied after any filters and sort fields not fully covered by the index; unsorted queries stop loading candidates once enough documents match
   - Implementation:
     - FindOptions type in [client/src/client/collection.ts](../client/src/client/collection.ts#L10)
     - sort handling in [client/src/client/collection.ts](../client/src/client/collection.ts#L71)
@@ -84,6 +85,7 @@ This section lists options supported by each client command, including commands 
     - query required
     - options.sort supported
     - options.limit accepted but internally forced to 1
+    - uses the same filter and sort handling as `find`, with an implicit limit of one
   - Implementation:
     - signature in [client/src/client/collection.ts](../client/src/client/collection.ts#L82)
     - forced limit=1 merge in [client/src/client/collection.ts](../client/src/client/collection.ts#L87)

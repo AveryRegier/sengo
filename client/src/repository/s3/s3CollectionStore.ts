@@ -21,6 +21,7 @@ import { addContext } from 'clox';
 import type { ExplainSink } from '../../client/explain.js';
 import { sort } from '../../util/sort.js';
 import { getOperator } from '../../client/expr/index.js';
+import { matchesDocument } from '../../client/queryFilter.js';
 
 export interface S3CollectionStoreOptions {
   region?: string;
@@ -207,6 +208,15 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       if (indexKeyValues.length > 0) {
         // Build index options including filters for the final indexed field if present in query
         const indexOptions: any = this.buildIndexOptions(options, index, queryForIndex);
+        let filterBeforeLimit = false;
+        if (indexOptions.limit > 0) {
+          if (this.canLimitAtIndex(index, queryForIndex, options)) {
+            sink?.onSortLimit(false, false, true, 'limit served by index ordering');
+          } else {
+            filterBeforeLimit = Object.keys(options?.sort ?? {}).length === 0;
+            delete indexOptions.limit;
+          }
+        }
         
         const allIds = await Promise.all(indexKeyValues.map(async key => {
             const ids = await index.findIdsForKey(key, indexOptions, sink);
@@ -216,6 +226,20 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
         sink?.onTimingPart('indexKeyLookup', Date.now() - indexLookupStartedAtMs, indexKeyValues.length);
         sink?.onIndexEntriesRead(index.name, indexKeyValues.length, allIds.length, set.length);
         sink?.onPlanWinner('INDEX_LOOKUP', index.name);
+        if (filterBeforeLimit && options?.limit !== undefined) {
+          sink?.onSortLimit(false, false, true, 'limit served after incremental filtering');
+          const matches: WithId<T>[] = [];
+          for (const id of set) {
+            const docs = await this.materializeCandidates(
+              [this.id2key(id)], 'indexLookup', loadDocuments, false, index.name,
+            );
+            for (const doc of docs) {
+              if (matchesDocument(doc, query)) matches.push(doc);
+            }
+            if (matches.length >= options.limit) break;
+          }
+          return matches;
+        }
         return this.materializeCandidates(
           set.map(this.id2key.bind(this)),
           'indexLookup',
@@ -277,6 +301,26 @@ export class S3CollectionStore<T> implements CollectionStore<T> {
       }
     }
 
+    return true;
+  }
+
+  private canLimitAtIndex(index: S3CollectionIndex, query: Record<string, any>, options?: FindOptions): boolean {
+    if (!this.canUseKeysAsResult(index, query)) return false;
+
+    const lookupKeys = index.keys.length > 1 ? index.keys.slice(0, -1) : index.keys;
+    for (const key of lookupKeys) {
+      const value = query[key.field];
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+        const operators = Object.keys(value);
+        if (operators.length !== 1 || !['$eq', '$in'].includes(operators[0])) return false;
+      }
+    }
+
+    const sortFields = Object.keys(options?.sort ?? {});
+    if (sortFields.length > 1) return false;
+    const finalField = index.keys[index.keys.length - 1].field;
+    if (sortFields.length === 1 && sortFields[0] !== '_id' && sortFields[0] !== finalField) return false;
+    if (sortFields[0] === '_id' && index.keys.length > 1 && query[finalField] !== undefined) return false;
     return true;
   }
 
