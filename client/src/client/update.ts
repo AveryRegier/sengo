@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { ObjectId } from 'bson';
 import { MongoServerError } from '../errors';
 
 type Document = Record<string, any>;
@@ -126,4 +127,28 @@ export function applyUpdate<T extends Document>(document: T, update: Document, i
     throw new MongoServerError('The _id field is immutable');
   }
   return result as T;
+}
+
+export function createUpsertDocument(filter: Document, update: Document): Document {
+  const equalityFields: Document = Object.create(null);
+  for (const [field, value] of Object.entries(filter)) {
+    if (field.startsWith('$')) continue;
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const operators = Object.keys(value).filter(key => key.startsWith('$'));
+      if (operators.length > 0) {
+        if (operators.length === 1 && operators[0] === '$eq') {
+          equalityFields[field] = value.$eq;
+        }
+        continue;
+      }
+    }
+    equalityFields[field] = value;
+  }
+  validateUpdate({ $set: equalityFields });
+  const upsertDocument = applyUpdate<Document>({}, { $set: equalityFields }, true);
+  const result = applyUpdate(upsertDocument, update, true);
+  if (result._id === undefined) {
+    result._id = new ObjectId().toString();
+  }
+  return result;
 }
